@@ -1,0 +1,11 @@
+[package]
+
+name = "jsonrpc"
+
+version = "0.1.0"
+
+authors = ["Marcin <kociolek.farfocle@gmail.com>"]
+
+
+[dependencies]
+rustc-serialize = "*"
