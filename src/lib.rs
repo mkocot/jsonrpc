@@ -5,7 +5,7 @@ use rustc_serialize::json::{self, Json, ToJson};
 use std::collections::{BTreeMap, HashMap};
 
 //TODO: Logger
-
+#[derive(Debug)]
 pub enum ErrorCode {
     ParseError,
     InvalidRequest,
@@ -153,7 +153,7 @@ impl ToJson for JsonRpcResponse {
 // Server
 pub struct JsonRpcServer {
     //type RpcFunction = Fn(Json) -> Result<Json, ErrorCode> + 'static;
-    methods: HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorCode> + 'static>>
+    methods: HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorCode> + 'static + Sync + Send>>
 }
 
 impl JsonRpcServer {
@@ -164,7 +164,7 @@ impl JsonRpcServer {
     }
 
     pub fn register_str<F>(&mut self, name: &str, f: F)
-        where F: Fn(&JsonRpcRequest) -> Result<Json, ErrorCode> + 'static {
+        where F: Fn(&JsonRpcRequest) -> Result<Json, ErrorCode> + 'static + Sync + Send {
         self.methods.insert(name.to_string(), Box::new(f));
     }
 
@@ -196,11 +196,15 @@ impl JsonRpcServer {
         match self.finalize_request(&request) {
             //Notification, Success but nothing to return
             Ok(ref s) if request.id == None && *s == Json::Null => Ok(None),
-            //No request id, but method returned some data...
-            Ok(_) if request.id == None => Err(InternalErrorCode::WithId(ErrorCode::InternalError, request.id)),
+            //No request id, so discard any result ...
+            Ok(_) if request.id == None => Ok(None),
             //Success and some data to send
             Ok(s) => Ok(Some(JsonRpcResponse::new_result(&request, s).to_json())),
-            //Error, just pass through
+            //Error, just pass through unless its notification
+            Err(ref e) if request.id == None => {
+                error!("Error processing request {:?}", e);
+                Ok(None)
+            },
             Err(e) => Err(InternalErrorCode::WithId(e, request.id))
         }
     }
@@ -233,7 +237,7 @@ impl JsonRpcServer {
         //tutaj juz mozna zwrocic informacje z kodem bo znamy request
         let method_invoke = match self.methods.get(&request.method) {
             Some(s) => s,
-            _ => { println!("Requested method '{}' not found!", request.method);
+            _ => { error!("Requested method '{}' not found!", request.method);
                    return Err(ErrorCode::MethodNotFound) }
         };
         method_invoke(&request)
@@ -247,7 +251,7 @@ impl JsonRpcServer {
         }
 
         for request in array {
-            println!("Processing {}", request);
+            info!("Processing {}", request);
             let response = request
                 .as_object()
                 //Convert None to error
