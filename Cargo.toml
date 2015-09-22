@@ -9,3 +9,4 @@ authors = ["Marcin <kociolek.farfocle@gmail.com>"]
 
 [dependencies]
 rustc-serialize = "*"
+log = "0.3.2"

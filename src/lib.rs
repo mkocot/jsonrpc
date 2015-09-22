@@ -1,6 +1,10 @@
 extern crate rustc_serialize;
+#[macro_use]
+extern crate log;
 use rustc_serialize::json::{self, Json, ToJson};
 use std::collections::{BTreeMap, HashMap};
+
+//TODO: Logger
 
 pub enum ErrorCode {
     ParseError,
@@ -10,6 +14,21 @@ pub enum ErrorCode {
     InternalError,
     //from -32000 to -32099
     ServerError(i32, &'static str),
+}
+
+enum InternalErrorCode {
+    WithId(ErrorCode, Option<Json>),
+    WithoutId(ErrorCode)
+}
+
+impl InternalErrorCode {
+    fn as_response(self) -> JsonRpcResponse {
+        let (err, id) = match self {
+            InternalErrorCode::WithId(err, id) => (err,id),
+            InternalErrorCode::WithoutId(err) => (err, None)
+        };
+        JsonRpcResponse::new_error(err, None, id)
+    }
 }
 
 //Convinient method for getting integer value for error
@@ -148,72 +167,65 @@ impl JsonRpcServer {
         where F: Fn(&JsonRpcRequest) -> Result<Json, ErrorCode> + 'static {
         self.methods.insert(name.to_string(), Box::new(f));
     }
+
     fn _handle_single_with_id(&self, req: &rustc_serialize::json::Object, request_id: &Option<Json>)
-        -> Result<Option<Json>, ErrorCode> {
-            let request_method = match req.get("method") {
-                Some(json) => match json.as_string() {
-                    Some(s) => s.to_string(),
-                    _ => return Err(ErrorCode::InvalidRequest)
-                },
-                _ => return Err(ErrorCode::InvalidRequest)
-            };
-
-            let request_params = match req.get("params") {
-                Some(json) => match json {
-                    &Json::Array(_) => Some(json.clone()),
-                    &Json::Object(_) => Some(json.clone()),
-                    _ => return Err(ErrorCode::InvalidRequest),
-                },
-                None => None
-            };
-
-            let request = JsonRpcRequest {
-                //Required
-                method: request_method,
-                //Optional
-                params: request_params,
-                //Optional
-                id: request_id.clone()
-            };
-            //id == None -> Notification (method can return only NULL)
-            match self.finalize_request(&request) {
-                //Notification, Success but nothing to return
-                Ok(ref s) if request.id == None && *s == Json::Null => Ok(None),
-                //No request id, but method returned some data...
-                Ok(_) if request.id == None => Err(ErrorCode::InternalError),
-                //Success and some data to send
-                Ok(s) => Ok(Some(JsonRpcResponse::new_result(&request, s).to_json())),
-                //Error, just pass through
-                Err(e) => Err(e)
-            }
-        }
-    fn _handle_single(&self, req: &rustc_serialize::json::Object)
-        -> Result<Option<Json>, ErrorCode> {
-        //Exclude version check before parse
-        match req.get("jsonrpc") {
-            Some(o) => match o.as_string() {
-                Some(s) => if s != "2.0" {
-                    return Err(ErrorCode::InvalidRequest)
-                } else {},
-                _ => return Err(ErrorCode::InvalidRequest)
-            },
-            _ => return Err(ErrorCode::InvalidRequest)
+        -> Result<Option<Json>, InternalErrorCode> {
+        let request_method = match req.get("method").and_then(|m|m.as_string()) {
+            Some(s) => s.to_string(),
+            _ => return Err(InternalErrorCode::WithId(ErrorCode::InvalidRequest, request_id.clone()))
         };
+
+        let request_params = match req.get("params") {
+            Some(json) => match json {
+                &Json::Array(_) => Some(json.clone()),
+                &Json::Object(_) => Some(json.clone()),
+                _ => return Err(InternalErrorCode::WithId(ErrorCode::InvalidRequest, request_id.clone())),
+            },
+            None => None
+        };
+
+        let request = JsonRpcRequest {
+            //Required
+            method: request_method,
+            //Optional
+            params: request_params,
+            //Optional
+            id: request_id.clone()
+        };
+        //id == None -> Notification (method can return only NULL)
+        match self.finalize_request(&request) {
+            //Notification, Success but nothing to return
+            Ok(ref s) if request.id == None && *s == Json::Null => Ok(None),
+            //No request id, but method returned some data...
+            Ok(_) if request.id == None => Err(InternalErrorCode::WithId(ErrorCode::InternalError, request.id)),
+            //Success and some data to send
+            Ok(s) => Ok(Some(JsonRpcResponse::new_result(&request, s).to_json())),
+            //Error, just pass through
+            Err(e) => Err(InternalErrorCode::WithId(e, request.id))
+        }
+    }
+
+    fn _handle_single(&self, req: &rustc_serialize::json::Object)
+        -> Result<Option<Json>, InternalErrorCode> {
+        // Ensure field jsonrpc exist and contains string "2.0"
+        if !req.get("jsonrpc").and_then(|o|o.as_string())
+            .and_then(|s|Some(s == "2.0")).unwrap_or(false) {
+            return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest))
+        }
+
         //try parse ID and then pass it to error message
         let request_id = match req.get("id") {
             Some(json) => match *json {
                 //Allow only primitives
                 Json::String(_) | Json::U64(_)
                     | Json::I64(_) | Json::Null => Some(json.clone()),
-                _ => return Err(ErrorCode::InvalidRequest)
+                _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest))
             },
             None => None
         };
 
-        match self._handle_single_with_id(req, &request_id) {
-            Err(e) => Ok(Some(JsonRpcResponse::new_error(e, None, request_id).to_json())),
-            Ok(o) => Ok(o)
-        }
+        //At this point we know assigned id
+        self._handle_single_with_id(req, &request_id)
     }
 
     fn finalize_request(&self, request: &JsonRpcRequest)
@@ -221,31 +233,30 @@ impl JsonRpcServer {
         //tutaj juz mozna zwrocic informacje z kodem bo znamy request
         let method_invoke = match self.methods.get(&request.method) {
             Some(s) => s,
-            _ => {
-                println!("Requested method '{}' not found!", request.method);
-                return Err(ErrorCode::MethodNotFound)
-            }
+            _ => { println!("Requested method '{}' not found!", request.method);
+                   return Err(ErrorCode::MethodNotFound) }
         };
         method_invoke(&request)
     }
 
-    fn _handle_multiple(&self, array: &rustc_serialize::json::Array) -> Result<Option<Json>, ErrorCode> {
+    fn _handle_multiple(&self, array: &rustc_serialize::json::Array)
+        -> Result<Option<Json>, InternalErrorCode> {
         let mut response_vector = Vec::new();
         if array.is_empty() {
-            return Err(ErrorCode::InvalidRequest);
+            return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest));
         }
 
         for request in array {
             println!("Processing {}", request);
-            let response = if request.is_object() {
-                match self._handle_single(request.as_object().unwrap()) {
-                    Ok(ok) => ok,
-                    //Skoro jest err, to id jest nieznane
-                    Err(err) => Some(JsonRpcResponse::new_error(err, None, None).to_json())
-                }
-            } else {
-                Some(JsonRpcResponse::new_error(ErrorCode::InvalidRequest, None, None).to_json())
-            };
+            let response = request
+                .as_object()
+                //Convert None to error
+                .ok_or(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest))
+                //Invoke remote procedure
+                .and_then(|o|self._handle_single(o))
+                //Convert any error to Json
+                .unwrap_or_else(|e|Some(e.as_response().to_json()));
+
             //Skip notifications in response
             if response != None {
                 response_vector.push(response);
@@ -253,7 +264,7 @@ impl JsonRpcServer {
         }
 
         //All notifications nothing to respond
-        if response_vector.len() == 0 {
+        if response_vector.is_empty() {
             Ok(None)
         } else {
             Ok(Some(response_vector.to_json()))
@@ -261,17 +272,17 @@ impl JsonRpcServer {
     }
 
     fn _handle_request(&self, request: &str)
-        -> Result<Option<Json>, ErrorCode> {
+        -> Result<Option<Json>, InternalErrorCode> {
         let request_json = match Json::from_str(&request) {
             Ok(o) => o,
-            Err(_) => return Err(ErrorCode::ParseError)
+            Err(_) => return Err(InternalErrorCode::WithoutId(ErrorCode::ParseError))
         };
 
         //for now only plain object support
         match request_json {
             Json::Object(ref s) => self._handle_single(s),
             Json::Array(ref a) => self._handle_multiple(a),
-            _ => return Err(ErrorCode::InvalidRequest)
+            _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest))
         }
     }
     //request: Raw json
@@ -282,8 +293,7 @@ impl JsonRpcServer {
             Ok(Some(resp)) => resp.to_json().to_string(),
             //Notification, no response
             Ok(None) => "".to_string(),
-            Err(err) => JsonRpcResponse::new_error(err, None, None)
-                .to_json().to_string()
+            Err(err) => err.as_response().to_json().to_string()
         }
     }
 }
