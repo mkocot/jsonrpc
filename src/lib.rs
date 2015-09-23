@@ -1,7 +1,7 @@
 extern crate rustc_serialize;
 #[macro_use]
 extern crate log;
-use rustc_serialize::json::{self, Json, ToJson};
+use rustc_serialize::json::{Json, ToJson};
 use std::collections::{BTreeMap, HashMap};
 
 /**
@@ -38,6 +38,7 @@ pub enum ErrorCode {
 /**
  * Internal enum used to determine if error was thrown when id was already known or not.
  * */
+#[derive(Debug)]
 enum InternalErrorCode {
     /**
      * Used when request contains correct id (also None)
@@ -56,7 +57,8 @@ impl InternalErrorCode {
     fn as_response(self) -> JsonRpcResponse {
         let (err, id) = match self {
             InternalErrorCode::WithId(err, id) => (err,id),
-            InternalErrorCode::WithoutId(err) => (err, None)
+            //Convert to Json::Null 
+            InternalErrorCode::WithoutId(err) => (err, Some(Json::Null))
         };
         JsonRpcResponse::new_error(err, None, id)
     }
@@ -181,8 +183,7 @@ impl JsonRpcResponse {
                 message: error.get_desc().to_string(),
                 data: data
             }),
-            //Id is required. Convert None -> Json:Null
-            id: id.or(Some(Json::Null))
+            id: id
         }
     }
     fn new_result(req: &JsonRpcRequest, data: Json) -> JsonRpcResponse {
@@ -197,6 +198,9 @@ impl JsonRpcResponse {
 impl ToJson for JsonRpcResponse {
     //Simple serialization
     fn to_json(&self) -> Json {
+        if self.id == None {
+            return ().to_json();
+        }
         let mut d = BTreeMap::new();
         d.insert("jsonrpc".to_string(), "2.0".to_string().to_json());
         if let Some(ref result) = self.result {
@@ -211,39 +215,58 @@ impl ToJson for JsonRpcResponse {
         Json::Object(d)
     }
 }
-// Server
+/**
+ * JSON-RPC processing unit.
+ * */
 pub struct JsonRpcServer {
+    /**
+     * Map with closures and functions assigned with names.
+     * */
     methods: HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorCode> + 'static + Sync + Send>>
 }
 
 impl JsonRpcServer {
+    /**
+     * Create new instance of JsonRpcServer.
+     * */
     pub fn new() -> JsonRpcServer {
         JsonRpcServer {
             methods: HashMap::new()
         }
     }
 
+    /**
+     * Adds method with name to server.
+     * */
     pub fn register_str<F>(&mut self, name: &str, f: F)
         where F: Fn(&JsonRpcRequest) -> Result<Json, ErrorCode> + 'static + Sync + Send {
         self.methods.insert(name.to_string(), Box::new(f));
     }
 
+    /**
+     * Remove method from known names.
+     * */
+    pub fn unregister_str(&mut self, name: &str) {
+        self.methods.remove(name);
+    }
+
     fn _handle_single_with_id(&self, req: &rustc_serialize::json::Object, request_id: &Option<Json>)
-        -> Result<Option<Json>, InternalErrorCode> {
+        -> Result<JsonRpcResponse, InternalErrorCode> {
         let request_method = match req.get("method").and_then(|m|m.as_string()) {
             Some(s) => s.to_string(),
-            _ => return Err(InternalErrorCode::WithId(ErrorCode::InvalidRequest, request_id.clone()))
+            _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest))
         };
 
         let request_params = match req.get("params") {
             Some(json) => match json {
                 &Json::Array(_) => Some(json.clone()),
                 &Json::Object(_) => Some(json.clone()),
-                _ => return Err(InternalErrorCode::WithId(ErrorCode::InvalidRequest, request_id.clone())),
+                _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest)),
             },
             None => None
         };
 
+        //From now request is considered as VALID and code should use WithId
         let request = JsonRpcRequest {
             //Required
             method: request_method,
@@ -252,25 +275,17 @@ impl JsonRpcServer {
             //Optional
             id: request_id.clone()
         };
-        //id == None -> Notification (method can return only NULL)
-        match self.finalize_request(&request) {
-            //Notification, Success but nothing to return
-            Ok(ref s) if request.id == None && *s == Json::Null => Ok(None),
-            //No request id, so discard any result ...
-            Ok(_) if request.id == None => Ok(None),
-            //Success and some data to send
-            Ok(s) => Ok(Some(JsonRpcResponse::new_result(&request, s).to_json())),
-            //Error, just pass through unless its notification
-            Err(ref e) if request.id == None => {
-                error!("Error processing request {:?}", e);
-                Ok(None)
-            },
-            Err(e) => Err(InternalErrorCode::WithId(e, request.id))
-        }
+
+        self.methods.get(&request.method).ok_or_else(||{
+            error!("Requested method '{}' not found!", request.method);
+            ErrorCode::MethodNotFound
+        }).and_then(|s|s(&request))
+        .map(|s| JsonRpcResponse::new_result(&request, s))
+        .map_err(move |e| InternalErrorCode::WithId(e, request.id))
     }
 
     fn _handle_single(&self, req: &rustc_serialize::json::Object)
-        -> Result<Option<Json>, InternalErrorCode> {
+        -> Result<JsonRpcResponse, InternalErrorCode> {
         // Ensure field jsonrpc exist and contains string "2.0"
         if !req.get("jsonrpc").and_then(|o|o.as_string())
             .and_then(|s|Some(s == "2.0")).unwrap_or(false) {
@@ -281,8 +296,9 @@ impl JsonRpcServer {
         let request_id = match req.get("id") {
             Some(json) => match *json {
                 //Allow only primitives
+                //We are using WithoutId becaouse we can't trust this request object
                 Json::Object(_) => 
-                    return Err(InternalErrorCode::WithId(ErrorCode::InvalidRequest, Some(json.clone()))),
+                    return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest)),
                 _ => Some(json.clone())
             },
             None => None
@@ -290,17 +306,6 @@ impl JsonRpcServer {
 
         //At this point we know assigned id
         self._handle_single_with_id(req, &request_id)
-    }
-
-    fn finalize_request(&self, request: &JsonRpcRequest)
-        -> Result<Json, ErrorCode> {
-        //tutaj juz mozna zwrocic informacje z kodem bo znamy request
-        let method_invoke = match self.methods.get(&request.method) {
-            Some(s) => s,
-            _ => { error!("Requested method '{}' not found!", request.method);
-                   return Err(ErrorCode::MethodNotFound) }
-        };
-        method_invoke(&request)
     }
 
     fn _handle_multiple(&self, array: &rustc_serialize::json::Array)
@@ -319,10 +324,10 @@ impl JsonRpcServer {
                 //Invoke remote procedure
                 .and_then(|o|self._handle_single(o))
                 //Convert any error to Json
-                .unwrap_or_else(|e|Some(e.as_response().to_json()));
+                .unwrap_or_else(|e|e.as_response());
 
             //Skip notifications in response
-            if response != None {
+            if response.id != None {
                 response_vector.push(response);
             }
         }
@@ -344,7 +349,7 @@ impl JsonRpcServer {
 
         //for now only plain object support
         match request_json {
-            Json::Object(ref s) => self._handle_single(s),
+            Json::Object(ref s) => self._handle_single(s).map(|m|Some(m.to_json())),
             Json::Array(ref a) => self._handle_multiple(a),
             _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest))
         }
@@ -354,10 +359,24 @@ impl JsonRpcServer {
     pub fn handle_request(&self, request: String) -> String {
         let result = self._handle_request(&request);
         match result {
-            Ok(Some(resp)) => resp.to_json().to_string(),
+            Ok(Some(ref resp)) if *resp != Json::Null => resp.to_json().to_string(),
             //Notification, no response
-            Ok(None) => "".to_string(),
-            Err(err) => err.as_response().to_json().to_string()
+            Ok(Some(ref some)) => {
+                warn!("Co to jest?: {:?}", some);
+                "".to_string()
+            },
+            Ok(_) => "".to_string(),
+            Err(err) => {
+                println!("DS {:?}", err);
+                let response = err.as_response().to_json();
+                println!("AS {:?}", response);
+                if response == Json::Null {
+                    println!("Empty");
+                    "".to_string()
+                } else {
+                    response.to_string()
+                }
+            }
         }
     }
 }
@@ -365,7 +384,7 @@ impl JsonRpcServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustc_serialize::json::{self, Json, ToJson};
+    use rustc_serialize::json::{Json, ToJson};
 
     //tests from JSON-RPC RFC
     #[test]
@@ -402,9 +421,10 @@ mod tests {
         let mut server = JsonRpcServer::new();
         server.register_str("update", |_| Ok(Json::Null));
         server.register_str("foobar", |_| Ok(Json::Null));
-
-        assert!("".to_string() == server.handle_request("{\"jsonrpc\": \"2.0\",                                                         \"method\": \"update\",
-                                        \"params\": [1,2,3,4,5]}".to_string()));
+        let response = server.handle_request("{\"jsonrpc\": \"2.0\",                                                         \"method\": \"update\",
+                                        \"params\": [1,2,3,4,5]}".to_string());
+        println!("Received: {:?}", response);
+        assert!("".to_string() == response);
         assert!("".to_string() == server.handle_request("{\"jsonrpc\": \"2.0\", \"method\": \"foobar\"}".to_string()));
     }
 
@@ -455,7 +475,7 @@ mod tests {
             {\"jsonrpc\": \"2.0\", \"method\": \"sum\", \"params\": [1,2,4], \"id\": \"1\"},
             {\"jsonrpc\": \"2.0\", \"method\"
         ]";
-        let mut server = JsonRpcServer::new();
+        let server = JsonRpcServer::new();
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32700, \"message\": \"Parse error\"}, \"id\": null}");
         let response = Json::from_str(&server.handle_request(request.to_string()));
         println!("Expected: {:?}", expected_response);
