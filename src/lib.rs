@@ -4,24 +4,55 @@ extern crate log;
 use rustc_serialize::json::{self, Json, ToJson};
 use std::collections::{BTreeMap, HashMap};
 
-//TODO: Logger
+/**
+ * Enum with possible errors.
+ * */
 #[derive(Debug)]
 pub enum ErrorCode {
+    /**
+     * Request is not valid JSON.
+     * */
     ParseError,
+    /**
+     * Invalid request, eg. invalid request object, lack of required fields etc.
+     * */
     InvalidRequest,
+    /**
+     * Method with given name is not existing.
+     * */
     MethodNotFound,
+    /**
+     * Requested method is not defined for given set of parameters.
+     * */
     InvalidParams,
+    /**
+     * Internal server error (eg. OOM, cosmic rays, etc.)
+     * */
     InternalError,
-    //from -32000 to -32099
+    /**
+     * Custom defined server errors. Error code should be between -32099 and -32000.
+     * */
     ServerError(i32, &'static str),
 }
 
+/**
+ * Internal enum used to determine if error was thrown when id was already known or not.
+ * */
 enum InternalErrorCode {
+    /**
+     * Used when request contains correct id (also None)
+     * */
     WithId(ErrorCode, Option<Json>),
+    /**
+     * Special case when error is returned before request id could be determined.
+     * */
     WithoutId(ErrorCode)
 }
 
 impl InternalErrorCode {
+    /**
+     * Converts InternalErrorCode to JsonRpcResponse.
+     * */
     fn as_response(self) -> JsonRpcResponse {
         let (err, id) = match self {
             InternalErrorCode::WithId(err, id) => (err,id),
@@ -33,6 +64,9 @@ impl InternalErrorCode {
 
 //Convinient method for getting integer value for error
 impl ErrorCode {
+    /**
+     * Retrieve error code.
+     * */
     fn get_code(&self) -> i32 {
         match *self {
             ErrorCode::ParseError => -32700,
@@ -44,6 +78,9 @@ impl ErrorCode {
         }
     }
 
+    /**
+     * Get short description for error.
+     * */
     fn get_desc(&self) -> &'static str {
         match *self {
             ErrorCode::ParseError => "Parse error",
@@ -55,6 +92,10 @@ impl ErrorCode {
         }
     }
 
+    /**
+     * Sanity check if requested custom error code is in valid range.
+     * Well-Defined errors are always valid.
+     * */
     fn is_valid(&self) -> bool {
         match *self {
             //Error code is only valid within that range
@@ -67,20 +108,30 @@ impl ErrorCode {
     }
 }
 
+/**
+ * Object describing client request.
+ * */
 pub struct JsonRpcRequest {
-    //exactly "2.0"
-    //jsonrpc: String, no point of sticking it there
+    /**
+     * Name of remote procedure to call.
+     * */
     pub method: String,
-    //by-position: ARRAY
-    //by-name: Object
+
+    /**
+     * Parameters to method. Only Object (request by name) or Array (request by name).
+     * */
     pub params: Option<Json>,
 
-    //HIDDEN
-    //String, Number or NULL
+    /**
+     * Request id from client. If None client send notification and don't want any response.
+     * Only OBJECT type is prohibited.
+     * This should remain provate field.
+     * */
     id: Option<Json>
 }
 
-pub struct ErrorJsonRpc {
+
+struct ErrorJsonRpc {
     code: i32,
     message: String,
     data: Option<Json>
@@ -98,13 +149,23 @@ impl ToJson for ErrorJsonRpc {
     }
 }
 
+/**
+ * Describe response from server to client.
+ * */
 pub struct JsonRpcResponse {
-    //exactly "2.0" (no point of sticking it there)
-    //jsonrpc: String,
-    //Only if success
+    /**
+     * Result of method invocation. None if error occured.
+     * */
     result: Option<Json>,
-    //Only if failure
+
+    /**
+     * Descibe error. This field is None on success.
+     * */
     error: Option<ErrorJsonRpc>,
+
+    /**
+     * Response id. Exactly match id from request. Value is never None.
+     * */
     id: Option<Json>
 }
 
@@ -152,7 +213,6 @@ impl ToJson for JsonRpcResponse {
 }
 // Server
 pub struct JsonRpcServer {
-    //type RpcFunction = Fn(Json) -> Result<Json, ErrorCode> + 'static;
     methods: HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorCode> + 'static + Sync + Send>>
 }
 
@@ -221,9 +281,9 @@ impl JsonRpcServer {
         let request_id = match req.get("id") {
             Some(json) => match *json {
                 //Allow only primitives
-                Json::String(_) | Json::U64(_)
-                    | Json::I64(_) | Json::Null => Some(json.clone()),
-                _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest))
+                Json::Object(_) => 
+                    return Err(InternalErrorCode::WithId(ErrorCode::InvalidRequest, Some(json.clone()))),
+                _ => Some(json.clone())
             },
             None => None
         };
