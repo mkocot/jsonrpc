@@ -60,7 +60,7 @@ impl InternalErrorCode {
     fn as_response(self) -> JsonRpcResponse {
         let (err, id) = match self {
             InternalErrorCode::WithId(err, id) => (err,id),
-            //Convert to Json::Null 
+            //Convert to Json::Null
             InternalErrorCode::WithoutId(err) => (err, Some(Json::Null))
         };
         JsonRpcResponse::new_error(err, None, id)
@@ -218,35 +218,26 @@ impl ToJson for JsonRpcResponse {
         Json::Object(d)
     }
 }
+
 /**
  * JSON-RPC processing unit.
  * */
-pub struct JsonRpcServer {
+pub struct JsonRpcServer<H: Handler + 'static> {
+    handler: H
+}
+
+pub struct HashMapJsonRpcServer {
     /**
      * Map with closures and functions assigned with names.
      * */
     methods: HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorCode> + 'static + Sync + Send>>,
 }
-
-impl Handler for JsonRpcServer {
-    fn handle(&self, req: &JsonRpcRequest) -> Result<Json, ErrorCode> {
-        self.methods.get(&req.method).ok_or_else(||{
-            error!("Requested method '{}' not found!", req.method);
-            ErrorCode::MethodNotFound
-        }).and_then(|s|s(&req))
-    }
-}
-
-impl JsonRpcServer {
-    /**
-     * Create new instance of JsonRpcServer.
-     * */
-    pub fn new() -> JsonRpcServer {
-        JsonRpcServer {
-            methods: HashMap::new(),
+impl HashMapJsonRpcServer {
+    pub fn new() -> HashMapJsonRpcServer {
+        HashMapJsonRpcServer {
+            methods: HashMap::new()
         }
     }
-
     /**
      * Adds method with name to server.
      * */
@@ -261,8 +252,38 @@ impl JsonRpcServer {
     pub fn unregister_str(&mut self, name: &str) {
         self.methods.remove(name);
     }
+}
 
-    fn _handle_single_with_id<H: Handler>(&self, req: &rustc_serialize::json::Object, request_id: &Option<Json>, h: &H)
+impl Handler for HashMapJsonRpcServer {
+    fn handle(&self, req: &JsonRpcRequest) -> Result<Json, ErrorCode> {
+        self.methods.get(&req.method).ok_or_else(||{
+            error!("Requested method '{}' not found!", req.method);
+            ErrorCode::MethodNotFound
+        }).and_then(|s|s(&req))
+    }
+}
+impl JsonRpcServer<HashMapJsonRpcServer> {
+    /**
+     * Create new default instance of JsonRpcServer.
+     * */
+    pub fn new() -> JsonRpcServer<HashMapJsonRpcServer> {
+        JsonRpcServer {
+            handler: HashMapJsonRpcServer::new()
+        }
+    }
+}
+
+impl <H: Handler> JsonRpcServer<H> {
+    /**
+     * Create instance of JsonRpcServer with custom handler
+     * */
+    pub fn new_handler(h: H) -> JsonRpcServer<H> {
+        JsonRpcServer {
+            handler: h
+        }
+    }
+
+    fn _handle_single_with_id(&self, req: &rustc_serialize::json::Object, request_id: &Option<Json>)
         -> Result<JsonRpcResponse, InternalErrorCode> {
         let request_method = match req.get("method").and_then(|m|m.as_string()) {
             Some(s) => s.to_string(),
@@ -287,11 +308,11 @@ impl JsonRpcServer {
             //Optional
             id: request_id.clone()
         };
-        h.handle(&request).map(|s| JsonRpcResponse::new_result(&request, s))
+        self.handler.handle(&request).map(|s| JsonRpcResponse::new_result(&request, s))
         .map_err(move |e| InternalErrorCode::WithId(e, request.id))
     }
 
-    fn _handle_single<H: Handler>(&self, req: &rustc_serialize::json::Object, h: &H)
+    fn _handle_single(&self, req: &rustc_serialize::json::Object)
         -> Result<JsonRpcResponse, InternalErrorCode> {
         // Ensure field jsonrpc exist and contains string "2.0"
         if !req.get("jsonrpc").and_then(|o|o.as_string())
@@ -304,7 +325,7 @@ impl JsonRpcServer {
             Some(json) => match *json {
                 //Allow only primitives
                 //We are using WithoutId becaouse we can't trust this request object
-                Json::Object(_) => 
+                Json::Object(_) =>
                     return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest)),
                 _ => Some(json.clone())
             },
@@ -312,10 +333,10 @@ impl JsonRpcServer {
         };
 
         //At this point we know assigned id
-        self._handle_single_with_id(req, &request_id, h)
+        self._handle_single_with_id(req, &request_id)
     }
 
-    fn _handle_multiple<H: Handler>(&self, array: &rustc_serialize::json::Array, h: &H)
+    fn _handle_multiple(&self, array: &rustc_serialize::json::Array)
         -> Result<Option<Json>, InternalErrorCode> {
         let mut response_vector = Vec::new();
         if array.is_empty() {
@@ -329,7 +350,7 @@ impl JsonRpcServer {
                 //Convert None to error
                 .ok_or(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest))
                 //Invoke remote procedure
-                .and_then(|o|self._handle_single(o, h))
+                .and_then(|o|self._handle_single(o))
                 //Convert any error to Json
                 .unwrap_or_else(|e|e.as_response());
 
@@ -347,7 +368,7 @@ impl JsonRpcServer {
         }
     }
 
-    fn _handle_request<H: Handler>(&self, request: &str, h: &H)
+    fn _handle_request(&self, request: &str)
         -> Result<Option<Json>, InternalErrorCode> {
         let request_json = match Json::from_str(&request) {
             Ok(o) => o,
@@ -356,19 +377,15 @@ impl JsonRpcServer {
 
         //for now only plain object support
         match request_json {
-            Json::Object(ref s) => self._handle_single(s, h).map(|m|Some(m.to_json())),
-            Json::Array(ref a) => self._handle_multiple(a, h),
+            Json::Object(ref s) => self._handle_single(s).map(|m|Some(m.to_json())),
+            Json::Array(ref a) => self._handle_multiple(a),
             _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest))
         }
     }
     //request: Raw json
     //return: Raw json
-    pub fn handle_request(&self, request: String) -> String {
-        self.handle_custom(self, &request)
-    }
-
-    pub fn handle_custom<H: Handler + 'static>(&self, h: &H, request: &String) -> String {
-        let result = self._handle_request(&request, h);
+    pub fn handle_request(&self, request: &str) -> String {
+        let result = self._handle_request(&request);
         match result {
             Ok(Some(ref resp)) if *resp != Json::Null => resp.to_json().to_string(),
             //Notification, no response
@@ -388,6 +405,14 @@ impl JsonRpcServer {
             }
         }
     }
+
+    pub fn get_handler(&self) -> &H {
+        &self.handler
+    }
+
+    pub fn get_handler_mut(&mut self) -> &mut H {
+        &mut self.handler
+    }
 }
 
 #[cfg(test)]
@@ -399,12 +424,15 @@ mod tests {
     #[test]
     fn test_positional() {
         let mut server = JsonRpcServer::new();
-        server.register_str("subtract", |_| Ok(19.to_json()));
+        {
+        let mut handler = server.get_handler_mut();
+        handler.register_str("subtract", |_| Ok(19.to_json()));
+        }
         let request = "{\"jsonrpc\": \"2.0\", \"method\": \"subtract\",
                         \"params\": [42, 23], \"id\": 1}";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\",
                                                \"result\": 19, \"id\": 1}");
-        let response = Json::from_str(&server.handle_request(request.to_string()));
+        let response = Json::from_str(&server.handle_request(request));
         println!("Expected: {:?}", expected_response);
         println!("Received: {:?}", response);
         assert!(expected_response == response);
@@ -413,12 +441,15 @@ mod tests {
     #[test]
     fn test_named() {
         let mut server = JsonRpcServer::new();
-        server.register_str("subtract", |_| Ok(19.to_json()));
+        {
+        let mut handler = server.get_handler_mut();
+        handler.register_str("subtract", |_| Ok(19.to_json()));
+        }
         let request = "{\"jsonrpc\": \"2.0\", \"method\": \"subtract\",
             \"params\": {\"subtrahend\": 23, \"minuend\": 42}, \"id\": 3}";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\",
                                                \"result\": 19, \"id\": 3}");
-        let response = Json::from_str(&server.handle_request(request.to_string()));
+        let response = Json::from_str(&server.handle_request(request));
         println!("Expected: {:?}", expected_response);
         println!("Received: {:?}", response);
         assert!(expected_response == response);
@@ -428,13 +459,15 @@ mod tests {
         //--> {"jsonrpc": "2.0", "method": "update", "params": [1,2,3,4,5]}
         //--> {"jsonrpc": "2.0", "method": "foobar"}
         let mut server = JsonRpcServer::new();
-        server.register_str("update", |_| Ok(Json::Null));
-        server.register_str("foobar", |_| Ok(Json::Null));
-        let response = server.handle_request("{\"jsonrpc\": \"2.0\",                                                         \"method\": \"update\",
-                                        \"params\": [1,2,3,4,5]}".to_string());
+        {
+        let mut handler = server.get_handler_mut();
+        handler.register_str("update", |_| Ok(Json::Null));
+        handler.register_str("foobar", |_| Ok(Json::Null));
+        }
+        let response = server.handle_request("{\"jsonrpc\": \"2.0\", \"method\": \"update\", \"params\": [1,2,3,4,5]}");
         println!("Received: {:?}", response);
         assert!("".to_string() == response);
-        assert!("".to_string() == server.handle_request("{\"jsonrpc\": \"2.0\", \"method\": \"foobar\"}".to_string()));
+        assert!("".to_string() == server.handle_request("{\"jsonrpc\": \"2.0\", \"method\": \"foobar\"}"));
     }
 
     #[test]
@@ -447,7 +480,7 @@ mod tests {
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\",
             \"error\": {\"code\": -32601, \"message\": \"Method not found\"},
             \"id\": \"1\"}");
-        let response = Json::from_str(&server.handle_request(request.to_string()));
+        let response = Json::from_str(&server.handle_request(request));
         println!("Expected: {:?}", expected_response);
         println!("Received: {:?}", response);
         assert!(expected_response == response);
@@ -459,7 +492,7 @@ mod tests {
         let server = JsonRpcServer::new();
         let request = "{\"jsonrpc\": \"2.0\", \"method\": \"foobar, \"params\": \"bar\", \"baz]";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32700, \"message\": \"Parse error\"}, \"id\": null}");
-        let response = Json::from_str(&server.handle_request(request.to_string()));
+        let response = Json::from_str(&server.handle_request(request));
         println!("Expected: {:?}", expected_response);
         println!("Received: {:?}", response);
         assert!(expected_response == response);
@@ -472,7 +505,7 @@ mod tests {
         let server = JsonRpcServer::new();
         let request = "{\"jsonrpc\": \"2.0\", \"method\": 1, \"params\": \"bar\"}";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}");
-        let response = Json::from_str(&server.handle_request(request.to_string()));
+        let response = Json::from_str(&server.handle_request(request));
         println!("Expected: {:?}", expected_response);
         println!("Received: {:?}", response);
         assert!(expected_response == response);
@@ -486,7 +519,7 @@ mod tests {
         ]";
         let server = JsonRpcServer::new();
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32700, \"message\": \"Parse error\"}, \"id\": null}");
-        let response = Json::from_str(&server.handle_request(request.to_string()));
+        let response = Json::from_str(&server.handle_request(request));
         println!("Expected: {:?}", expected_response);
         println!("Received: {:?}", response);
         assert!(expected_response == response);
@@ -497,7 +530,7 @@ mod tests {
         let request = "[]";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}");
         let server = JsonRpcServer::new();
-        let response = Json::from_str(&server.handle_request(request.to_string()));
+        let response = Json::from_str(&server.handle_request(request));
         println!("Expected: {:?}", expected_response);
         println!("Received: {:?}", response);
         assert!(expected_response == response);
@@ -510,7 +543,7 @@ mod tests {
     {\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}
 ]");
         let server = JsonRpcServer::new();
-        let response = Json::from_str(&server.handle_request(request.to_string()));
+        let response = Json::from_str(&server.handle_request(request));
         println!("Expected: {:?}", expected_response);
         println!("Received: {:?}", response);
         assert!(expected_response == response);
@@ -525,7 +558,7 @@ mod tests {
             {\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}
             ]");
         let server = JsonRpcServer::new();
-        let response = Json::from_str(&server.handle_request(request.to_string()));
+        let response = Json::from_str(&server.handle_request(request));
         println!("Expected: {:?}", expected_response);
         println!("Received: {:?}", response);
         assert!(expected_response == response);
@@ -551,11 +584,14 @@ mod tests {
         ]");
 
         let mut server = JsonRpcServer::new();
-        server.register_str("sum", |_| Ok(7.to_json()));
-        server.register_str("notify_hello", |_| Ok(Json::Null));
-        server.register_str("subtract", |_| Ok(19.to_json()));
-        server.register_str("get_data", |_| Ok(vec!["hello".to_json(), 5.to_json()].to_json()));
-        let response = Json::from_str(&server.handle_request(request.to_string()));
+        {
+        let mut handler = server.get_handler_mut();
+        handler.register_str("sum", |_| Ok(7.to_json()));
+        handler.register_str("notify_hello", |_| Ok(Json::Null));
+        handler.register_str("subtract", |_| Ok(19.to_json()));
+        handler.register_str("get_data", |_| Ok(vec!["hello".to_json(), 5.to_json()].to_json()));
+        }
+        let response = Json::from_str(&server.handle_request(request));
         println!("Expected: {:?}", expected_response);
         println!("Received: {:?}", response);
         assert!(expected_response == response);
@@ -568,9 +604,12 @@ mod tests {
         {\"jsonrpc\": \"2.0\", \"method\": \"notify_hello\", \"params\": [7]}
         ]";
         let mut server = JsonRpcServer::new();
-        server.register_str("notify_sum", |_| Ok(Json::Null));
-        server.register_str("notify_hello", |_| Ok(Json::Null));
-        let response = server.handle_request(request.to_string());
+        {
+        let mut handler = server.get_handler_mut();
+        handler.register_str("notify_sum", |_| Ok(Json::Null));
+        handler.register_str("notify_hello", |_| Ok(Json::Null));
+        }
+        let response = server.handle_request(request);
         println!("Expected: ");
         println!("Received: {}", response);
         assert!("" == response);
