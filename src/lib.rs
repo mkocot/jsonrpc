@@ -384,23 +384,23 @@ impl <H: Handler> JsonRpcServer<H> {
     }
     //request: Raw json
     //return: Raw json
-    pub fn handle_request(&self, request: &str) -> String {
+    pub fn handle_request(&self, request: &str) -> Option<String> {
         let result = self._handle_request(&request);
         match result {
-            Ok(Some(ref resp)) if *resp != Json::Null => resp.to_json().to_string(),
-            //Notification, no response
+            Ok(Some(ref resp)) if *resp != Json::Null => Some(resp.to_json().to_string()),
+            //Notification (but got some data?), no returned response anyway
             Ok(Some(ref some)) => {
                 warn!("Co to jest?: {:?}", some);
-                "".to_string()
+                None
             },
-            Ok(_) => "".to_string(),
+            Ok(_) => None,
             Err(err) => {
                 let response = err.as_response().to_json();
                 if response == Json::Null {
                     println!("Empty");
-                    "".to_string()
+                    None
                 } else {
-                    response.to_string()
+                    Some(response.to_string())
                 }
             }
         }
@@ -425,34 +425,26 @@ mod tests {
     fn test_positional() {
         let mut server = JsonRpcServer::new();
         {
-        let mut handler = server.get_handler_mut();
-        handler.register_str("subtract", |_| Ok(19.to_json()));
+            let mut handler = server.get_handler_mut();
+            handler.register_str("subtract", |_| Ok(19.to_json()));
         }
-        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"subtract\",
-                        \"params\": [42, 23], \"id\": 1}";
-        let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\",
-                                               \"result\": 19, \"id\": 1}");
-        let response = Json::from_str(&server.handle_request(request));
-        println!("Expected: {:?}", expected_response);
-        println!("Received: {:?}", response);
-        assert!(expected_response == response);
+        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"subtract\", \"params\": [42, 23], \"id\": 1}";
+        let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"result\": 19, \"id\": 1}");
+        let response = Json::from_str(&server.handle_request(request).unwrap());
+        assert_eq!(expected_response, response);
     }
 
     #[test]
     fn test_named() {
         let mut server = JsonRpcServer::new();
         {
-        let mut handler = server.get_handler_mut();
-        handler.register_str("subtract", |_| Ok(19.to_json()));
+            let mut handler = server.get_handler_mut();
+            handler.register_str("subtract", |_| Ok(19.to_json()));
         }
-        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"subtract\",
-            \"params\": {\"subtrahend\": 23, \"minuend\": 42}, \"id\": 3}";
-        let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\",
-                                               \"result\": 19, \"id\": 3}");
-        let response = Json::from_str(&server.handle_request(request));
-        println!("Expected: {:?}", expected_response);
-        println!("Received: {:?}", response);
-        assert!(expected_response == response);
+        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"subtract\", \"params\": {\"subtrahend\": 23, \"minuend\": 42}, \"id\": 3}";
+        let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"result\": 19, \"id\": 3}");
+        let response = Json::from_str(&server.handle_request(request).unwrap());
+        assert_eq!(expected_response, response);
     }
     #[test]
     fn test_notification() {
@@ -460,14 +452,13 @@ mod tests {
         //--> {"jsonrpc": "2.0", "method": "foobar"}
         let mut server = JsonRpcServer::new();
         {
-        let mut handler = server.get_handler_mut();
-        handler.register_str("update", |_| Ok(Json::Null));
-        handler.register_str("foobar", |_| Ok(Json::Null));
+            let mut handler = server.get_handler_mut();
+            handler.register_str("update", |_| Ok(Json::Null));
+            handler.register_str("foobar", |_| Ok(Json::Null));
         }
         let response = server.handle_request("{\"jsonrpc\": \"2.0\", \"method\": \"update\", \"params\": [1,2,3,4,5]}");
-        println!("Received: {:?}", response);
-        assert!("".to_string() == response);
-        assert!("".to_string() == server.handle_request("{\"jsonrpc\": \"2.0\", \"method\": \"foobar\"}"));
+        assert_eq!(None, response);
+        assert_eq!(None, server.handle_request("{\"jsonrpc\": \"2.0\", \"method\": \"foobar\"}"));
     }
 
     #[test]
@@ -480,10 +471,8 @@ mod tests {
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\",
             \"error\": {\"code\": -32601, \"message\": \"Method not found\"},
             \"id\": \"1\"}");
-        let response = Json::from_str(&server.handle_request(request));
-        println!("Expected: {:?}", expected_response);
-        println!("Received: {:?}", response);
-        assert!(expected_response == response);
+        let response = Json::from_str(&server.handle_request(request).unwrap());
+        assert_eq!(expected_response, response);
     }
     #[test]
     fn test_call_invalid_json() {
@@ -492,10 +481,8 @@ mod tests {
         let server = JsonRpcServer::new();
         let request = "{\"jsonrpc\": \"2.0\", \"method\": \"foobar, \"params\": \"bar\", \"baz]";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32700, \"message\": \"Parse error\"}, \"id\": null}");
-        let response = Json::from_str(&server.handle_request(request));
-        println!("Expected: {:?}", expected_response);
-        println!("Received: {:?}", response);
-        assert!(expected_response == response);
+        let response = Json::from_str(&server.handle_request(request).unwrap());
+        assert_eq!(expected_response, response);
     }
 
     #[test]
@@ -505,10 +492,8 @@ mod tests {
         let server = JsonRpcServer::new();
         let request = "{\"jsonrpc\": \"2.0\", \"method\": 1, \"params\": \"bar\"}";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}");
-        let response = Json::from_str(&server.handle_request(request));
-        println!("Expected: {:?}", expected_response);
-        println!("Received: {:?}", response);
-        assert!(expected_response == response);
+        let response = Json::from_str(&server.handle_request(request).unwrap());
+        assert_eq!(expected_response, response);
     }
 
     #[test]
@@ -519,10 +504,8 @@ mod tests {
         ]";
         let server = JsonRpcServer::new();
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32700, \"message\": \"Parse error\"}, \"id\": null}");
-        let response = Json::from_str(&server.handle_request(request));
-        println!("Expected: {:?}", expected_response);
-        println!("Received: {:?}", response);
-        assert!(expected_response == response);
+        let response = Json::from_str(&server.handle_request(request).unwrap());
+        assert_eq!(expected_response, response);
     }
 
     #[test]
@@ -530,23 +513,17 @@ mod tests {
         let request = "[]";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}");
         let server = JsonRpcServer::new();
-        let response = Json::from_str(&server.handle_request(request));
-        println!("Expected: {:?}", expected_response);
-        println!("Received: {:?}", response);
-        assert!(expected_response == response);
+        let response = Json::from_str(&server.handle_request(request).unwrap());
+        assert_eq!(expected_response, response);
     }
 
     #[test]
     fn test_call_with_invalid_batch_not_empty() {
         let request = "[1]";
-        let expected_response = Json::from_str("[
-    {\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}
-]");
+        let expected_response = Json::from_str("[{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}]");
         let server = JsonRpcServer::new();
-        let response = Json::from_str(&server.handle_request(request));
-        println!("Expected: {:?}", expected_response);
-        println!("Received: {:?}", response);
-        assert!(expected_response == response);
+        let response = Json::from_str(&server.handle_request(request).unwrap());
+        assert_eq!(expected_response, response);
     }
 
     #[test]
@@ -558,10 +535,8 @@ mod tests {
             {\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}
             ]");
         let server = JsonRpcServer::new();
-        let response = Json::from_str(&server.handle_request(request));
-        println!("Expected: {:?}", expected_response);
-        println!("Received: {:?}", response);
-        assert!(expected_response == response);
+        let response = Json::from_str(&server.handle_request(request).unwrap());
+        assert_eq!(expected_response, response);
     }
 
     #[test]
@@ -585,16 +560,14 @@ mod tests {
 
         let mut server = JsonRpcServer::new();
         {
-        let mut handler = server.get_handler_mut();
-        handler.register_str("sum", |_| Ok(7.to_json()));
-        handler.register_str("notify_hello", |_| Ok(Json::Null));
-        handler.register_str("subtract", |_| Ok(19.to_json()));
-        handler.register_str("get_data", |_| Ok(vec!["hello".to_json(), 5.to_json()].to_json()));
+            let mut handler = server.get_handler_mut();
+            handler.register_str("sum", |_| Ok(7.to_json()));
+            handler.register_str("notify_hello", |_| Ok(Json::Null));
+            handler.register_str("subtract", |_| Ok(19.to_json()));
+            handler.register_str("get_data", |_| Ok(vec!["hello".to_json(), 5.to_json()].to_json()));
         }
-        let response = Json::from_str(&server.handle_request(request));
-        println!("Expected: {:?}", expected_response);
-        println!("Received: {:?}", response);
-        assert!(expected_response == response);
+        let response = Json::from_str(&server.handle_request(request).unwrap());
+        assert_eq!(expected_response, response);
     }
 
     #[test]
@@ -605,13 +578,11 @@ mod tests {
         ]";
         let mut server = JsonRpcServer::new();
         {
-        let mut handler = server.get_handler_mut();
-        handler.register_str("notify_sum", |_| Ok(Json::Null));
-        handler.register_str("notify_hello", |_| Ok(Json::Null));
+            let mut handler = server.get_handler_mut();
+            handler.register_str("notify_sum", |_| Ok(Json::Null));
+            handler.register_str("notify_hello", |_| Ok(Json::Null));
         }
         let response = server.handle_request(request);
-        println!("Expected: ");
-        println!("Received: {}", response);
-        assert!("" == response);
+        assert_eq!(None, response);
     }
 }
