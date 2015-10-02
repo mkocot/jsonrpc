@@ -35,9 +35,29 @@ pub enum ErrorCode {
     ServerError(i32, &'static str),
 }
 
-pub trait Handler {
-    fn handle(&self, reg: &JsonRpcRequest) -> Result<Json, ErrorCode>;
+/**
+ * Enum for extra data returned with ErrorCode.
+ * */
+#[derive(Debig)]
+pub enum ErrorCodeData {
+    /**
+     * Error with extra data
+     * */
+    With(ErrorCode, Json),
+
+    /**
+     * Error without any extra data
+     * */
+    Without(ErrorCode)
 }
+
+/**
+ * Handler for processing request.
+ * */
+pub trait Handler {
+    fn handle(&self, reg: &JsonRpcRequest) -> Result<Json, ErrorCodeData>;
+}
+
 /**
  * Internal enum used to determine if error was thrown when id was already known or not.
  * */
@@ -46,11 +66,11 @@ enum InternalErrorCode {
     /**
      * Used when request contains correct id (also None)
      * */
-    WithId(ErrorCode, Option<Json>),
+    WithId(ErrorCode, Option<Json>, Option<Json>),
     /**
      * Special case when error is returned before request id could be determined.
      * */
-    WithoutId(ErrorCode)
+    WithoutId(ErrorCode, Option<Json>)
 }
 
 impl InternalErrorCode {
@@ -58,12 +78,12 @@ impl InternalErrorCode {
      * Converts InternalErrorCode to JsonRpcResponse.
      * */
     fn as_response(self) -> JsonRpcResponse {
-        let (err, id) = match self {
-            InternalErrorCode::WithId(err, id) => (err,id),
+        let (err, id, data) = match self {
+            InternalErrorCode::WithId(err, id, data) => (err, id, data),
             //Convert to Json::Null
-            InternalErrorCode::WithoutId(err) => (err, Some(Json::Null))
+            InternalErrorCode::WithoutId(err, data) => (err, Some(Json::Null), data)
         };
-        JsonRpcResponse::new_error(err, None, id)
+        JsonRpcResponse::new_error(err, data, id)
     }
 }
 
@@ -135,10 +155,23 @@ pub struct JsonRpcRequest {
     id: Option<Json>
 }
 
-
+/**
+ * Describe Error response
+ * */
 struct ErrorJsonRpc {
+    /**
+     * Error code
+     * */
     code: i32,
+
+    /**
+     * Short error description
+     * */
     message: String,
+
+    /**
+     * Extra information details
+     * */
     data: Option<Json>
 }
 
@@ -230,7 +263,7 @@ pub struct HashMapJsonRpcServer {
     /**
      * Map with closures and functions assigned with names.
      * */
-    methods: HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorCode> + 'static + Sync + Send>>,
+    methods: HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorCodeData> + 'static + Sync + Send>>,
 }
 impl HashMapJsonRpcServer {
     pub fn new() -> HashMapJsonRpcServer {
@@ -242,7 +275,7 @@ impl HashMapJsonRpcServer {
      * Adds method with name to server.
      * */
     pub fn register_str<F>(&mut self, name: &str, f: F)
-        where F: Fn(&JsonRpcRequest) -> Result<Json, ErrorCode> + 'static + Sync + Send {
+        where F: Fn(&JsonRpcRequest) -> Result<Json, ErrorCodeData> + 'static + Sync + Send {
         self.methods.insert(name.to_string(), Box::new(f));
     }
 
@@ -255,10 +288,10 @@ impl HashMapJsonRpcServer {
 }
 
 impl Handler for HashMapJsonRpcServer {
-    fn handle(&self, req: &JsonRpcRequest) -> Result<Json, ErrorCode> {
+    fn handle(&self, req: &JsonRpcRequest) -> Result<Json, ErrorCodeData> {
         self.methods.get(&req.method).ok_or_else(||{
             error!("Requested method '{}' not found!", req.method);
-            ErrorCode::MethodNotFound
+            ErrorCodeData::Without(ErrorCode::MethodNotFound)
         }).and_then(|s|s(&req))
     }
 }
@@ -287,14 +320,14 @@ impl <H: Handler> JsonRpcServer<H> {
         -> Result<JsonRpcResponse, InternalErrorCode> {
         let request_method = match req.get("method").and_then(|m|m.as_string()) {
             Some(s) => s.to_string(),
-            _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest))
+            _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
         };
 
         let request_params = match req.get("params") {
             Some(json) => match json {
                 &Json::Array(_) => Some(json.clone()),
                 &Json::Object(_) => Some(json.clone()),
-                _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest)),
+                _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None)),
             },
             None => None
         };
@@ -309,7 +342,13 @@ impl <H: Handler> JsonRpcServer<H> {
             id: request_id.clone()
         };
         self.handler.handle(&request).map(|s| JsonRpcResponse::new_result(&request, s))
-        .map_err(move |e| InternalErrorCode::WithId(e, request.id))
+        .map_err(move |e| { 
+            let (error, data) = match e {
+                ErrorCodeData::Without(e) => (e, None),
+                ErrorCodeData::WithData(e,d) => (e, Some(d))
+            };
+            InternalErrorCode::WithId(error, request.id, data)
+        })
     }
 
     fn _handle_single(&self, req: &rustc_serialize::json::Object)
@@ -317,7 +356,7 @@ impl <H: Handler> JsonRpcServer<H> {
         // Ensure field jsonrpc exist and contains string "2.0"
         if !req.get("jsonrpc").and_then(|o|o.as_string())
             .and_then(|s|Some(s == "2.0")).unwrap_or(false) {
-            return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest))
+            return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
         }
 
         //try parse ID and then pass it to error message
@@ -326,7 +365,7 @@ impl <H: Handler> JsonRpcServer<H> {
                 //Allow only primitives
                 //We are using WithoutId becaouse we can't trust this request object
                 Json::Object(_) =>
-                    return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest)),
+                    return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None)),
                 _ => Some(json.clone())
             },
             None => None
@@ -340,7 +379,7 @@ impl <H: Handler> JsonRpcServer<H> {
         -> Result<Option<Json>, InternalErrorCode> {
         let mut response_vector = Vec::new();
         if array.is_empty() {
-            return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest));
+            return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None));
         }
 
         for request in array {
@@ -348,7 +387,7 @@ impl <H: Handler> JsonRpcServer<H> {
             let response = request
                 .as_object()
                 //Convert None to error
-                .ok_or(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest))
+                .ok_or(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
                 //Invoke remote procedure
                 .and_then(|o|self._handle_single(o))
                 //Convert any error to Json
@@ -372,14 +411,14 @@ impl <H: Handler> JsonRpcServer<H> {
         -> Result<Option<Json>, InternalErrorCode> {
         let request_json = match Json::from_str(&request) {
             Ok(o) => o,
-            Err(_) => return Err(InternalErrorCode::WithoutId(ErrorCode::ParseError))
+            Err(_) => return Err(InternalErrorCode::WithoutId(ErrorCode::ParseError, None))
         };
 
         //for now only plain object support
         match request_json {
             Json::Object(ref s) => self._handle_single(s).map(|m|Some(m.to_json())),
             Json::Array(ref a) => self._handle_multiple(a),
-            _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest))
+            _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
         }
     }
     //request: Raw json
