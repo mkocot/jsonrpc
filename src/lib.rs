@@ -38,7 +38,7 @@ pub enum ErrorCode {
 /**
  * Enum for extra data returned with ErrorCode.
  * */
-#[derive(Debig)]
+#[derive(Debug)]
 pub enum ErrorCodeData {
     /**
      * Error with extra data
@@ -345,7 +345,7 @@ impl <H: Handler> JsonRpcServer<H> {
         .map_err(move |e| { 
             let (error, data) = match e {
                 ErrorCodeData::Without(e) => (e, None),
-                ErrorCodeData::WithData(e,d) => (e, Some(d))
+                ErrorCodeData::With(e,d) => (e, Some(d))
             };
             InternalErrorCode::WithId(error, request.id, data)
         })
