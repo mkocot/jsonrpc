@@ -77,7 +77,7 @@ impl InternalErrorCode {
     /**
      * Converts InternalErrorCode to JsonRpcResponse.
      * */
-    fn as_response(self) -> JsonRpcResponse {
+    fn into_response(self) -> JsonRpcResponse {
         let (err, id, data) = match self {
             InternalErrorCode::WithId(err, id, data) => (err, id, data),
             //Convert to Json::Null
@@ -178,10 +178,10 @@ struct ErrorJsonRpc {
 impl ToJson for ErrorJsonRpc {
     fn to_json(&self) -> Json {
         let mut d = BTreeMap::new();
-        d.insert("code".to_string(), self.code.to_json());
-        d.insert("message".to_string(), self.message.to_json());
+        d.insert("code".to_owned(), self.code.to_json());
+        d.insert("message".to_owned(), self.message.to_json());
         if let Some(ref data) = self.data {
-            d.insert("data".to_string(), data.clone());
+            d.insert("data".to_owned(), data.clone());
         }
         Json::Object(d)
     }
@@ -216,7 +216,7 @@ impl JsonRpcResponse {
             result: None,
             error: Some(ErrorJsonRpc {
                 code: error.get_code(),
-                message: error.get_desc().to_string(),
+                message: error.get_desc().to_owned(),
                 data: data
             }),
             id: id
@@ -238,15 +238,15 @@ impl ToJson for JsonRpcResponse {
             return ().to_json();
         }
         let mut d = BTreeMap::new();
-        d.insert("jsonrpc".to_string(), "2.0".to_string().to_json());
+        d.insert("jsonrpc".to_owned(), "2.0".to_owned().to_json());
         if let Some(ref result) = self.result {
-            d.insert("result".to_string(), result.clone());
+            d.insert("result".to_owned(), result.clone());
         }
         if let Some(ref error) = self.error {
-            d.insert("error".to_string(), error.to_json());
+            d.insert("error".to_owned(), error.to_json());
         }
         if let Some(ref id) = self.id {
-            d.insert("id".to_string(), id.clone());
+            d.insert("id".to_owned(), id.clone());
         }
         Json::Object(d)
     }
@@ -276,7 +276,7 @@ impl HashMapJsonRpcServer {
      * */
     pub fn register_str<F>(&mut self, name: &str, f: F)
         where F: Fn(&JsonRpcRequest) -> Result<Json, ErrorCodeData> + 'static + Sync + Send {
-        self.methods.insert(name.to_string(), Box::new(f));
+        self.methods.insert(name.to_owned(), Box::new(f));
     }
 
     /**
@@ -319,14 +319,14 @@ impl <H: Handler> JsonRpcServer<H> {
     fn _handle_single_with_id(&self, req: &rustc_serialize::json::Object, request_id: &Option<Json>)
         -> Result<JsonRpcResponse, InternalErrorCode> {
         let request_method = match req.get("method").and_then(|m|m.as_string()) {
-            Some(s) => s.to_string(),
+            Some(s) => s.to_owned(),
             _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
         };
 
         let request_params = match req.get("params") {
-            Some(json) => match json {
-                &Json::Array(_) => Some(json.clone()),
-                &Json::Object(_) => Some(json.clone()),
+            Some(json) => match *json {
+                Json::Array(_) => Some(json.clone()),
+                Json::Object(_) => Some(json.clone()),
                 _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None)),
             },
             None => None
@@ -391,7 +391,7 @@ impl <H: Handler> JsonRpcServer<H> {
                 //Invoke remote procedure
                 .and_then(|o|self._handle_single(o))
                 //Convert any error to Json
-                .unwrap_or_else(|e|e.as_response());
+                .unwrap_or_else(|e|e.into_response());
 
             //Skip notifications in response
             if response.id != None {
@@ -418,7 +418,7 @@ impl <H: Handler> JsonRpcServer<H> {
         match request_json {
             Json::Object(ref s) => self._handle_single(s).map(|m|Some(m.to_json())),
             Json::Array(ref a) => self._handle_multiple(a),
-            _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
+            _ => Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
         }
     }
     //request: Raw json
@@ -434,7 +434,7 @@ impl <H: Handler> JsonRpcServer<H> {
             },
             Ok(_) => None,
             Err(err) => {
-                let response = err.as_response().to_json();
+                let response = err.into_response().to_json();
                 if response == Json::Null {
                     println!("Empty");
                     None
