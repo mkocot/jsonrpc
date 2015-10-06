@@ -377,12 +377,12 @@ impl <H: Handler> JsonRpcServer<H> {
 
     fn _handle_multiple(&self, array: &rustc_serialize::json::Array)
         -> Result<Option<Json>, InternalErrorCode> {
-        let mut response_vector = Vec::new();
         if array.is_empty() {
             return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None));
         }
 
-        for request in array {
+        //Convert to vector (required by json api)
+        let response_vector: Vec<_> = array.iter().filter_map(|request| {
             info!("Processing {}", request);
             let response = request
                 .as_object()
@@ -394,10 +394,12 @@ impl <H: Handler> JsonRpcServer<H> {
                 .unwrap_or_else(|e|e.into_response());
 
             //Skip notifications in response
-            if response.id != None {
-                response_vector.push(response);
+            if response.id == None {
+                None
+            } else {
+                Some(response)
             }
-        }
+        }).collect();
 
         //All notifications nothing to respond
         if response_vector.is_empty() {
