@@ -35,27 +35,44 @@ pub enum ErrorCode {
     ServerError(i32, &'static str),
 }
 
-/**
- * Enum for extra data returned with ErrorCode.
- * */
-#[derive(Debug)]
-pub enum ErrorCodeData {
-    /**
-     * Error with extra data
-     * */
-    With(ErrorCode, Json),
 
-    /**
-     * Error without any extra data
-     * */
-    Without(ErrorCode)
+// /**
+// * Error struct returned by user function.
+// * */
+//#[derive(Debug)]
+//pub struct ErrorCodeData {
+//    /**
+//     * Error code
+//     * */
+//    pub error: ErrorCode,
+//
+//    /**
+//     * Extra data (optional)
+//     * */
+//    pub data: Option<Json>,
+//}
+
+impl ErrorJsonRpc {
+    pub fn new(err: ErrorCode) -> ErrorJsonRpc {
+        ErrorJsonRpc {
+            error: err,
+            data: None
+        }
+    }
+
+    pub fn new_data(err: ErrorCode, data: Json) -> ErrorJsonRpc {
+        ErrorJsonRpc {
+            error: err,
+            data: Some(data)
+        }
+    }
 }
 
 /**
  * Handler for processing request.
  * */
 pub trait Handler {
-    fn handle(&self, reg: &JsonRpcRequest) -> Result<Json, ErrorCodeData>;
+    fn handle(&self, reg: &JsonRpcRequest) -> Result<Json, ErrorJsonRpc>;
 }
 
 /**
@@ -158,29 +175,36 @@ pub struct JsonRpcRequest {
 /**
  * Describe Error response
  * */
-struct ErrorJsonRpc {
+pub struct ErrorJsonRpc {
     /**
      * Error code
      * */
-    code: i32,
+    error: ErrorCode,
 
     /**
-     * Short error description
-     * */
-    message: String,
-
-    /**
-     * Extra information details
+     * Extra information and details
      * */
     data: Option<Json>
+}
+
+impl ErrorJsonRpc {
+    pub fn get_code(&self) -> i32 {
+        self.error.get_code()
+    }
+    pub fn get_message(&self) -> &str {
+        self.error.get_desc()
+    }
+    pub fn get_data(&self) -> &Option<Json> {
+        &self.data
+    }
 }
 
 impl ToJson for ErrorJsonRpc {
     fn to_json(&self) -> Json {
         let mut d = BTreeMap::new();
-        d.insert("code".to_owned(), self.code.to_json());
-        d.insert("message".to_owned(), self.message.to_json());
-        if let Some(ref data) = self.data {
+        d.insert("code".to_owned(), self.get_code().to_json());
+        d.insert("message".to_owned(), self.get_message().to_json());
+        if let &Some(ref data) = self.get_data() {
             d.insert("data".to_owned(), data.clone());
         }
         Json::Object(d)
@@ -212,16 +236,15 @@ impl JsonRpcResponse {
         -> JsonRpcResponse {
         let error = if err.is_valid() { err } else { ErrorCode::InternalError };
         JsonRpcResponse {
-            //jsonrpc: "2.0".to_string(),
             result: None,
-            error: Some(ErrorJsonRpc {
-                code: error.get_code(),
-                message: error.get_desc().to_owned(),
-                data: data
-            }),
+            error: match data {
+                Some(data) => Some(ErrorJsonRpc::new_data(error, data)),
+                None => Some(ErrorJsonRpc::new(error))
+            },
             id: id
         }
     }
+
     fn new_result(req: &JsonRpcRequest, data: Json) -> JsonRpcResponse {
         JsonRpcResponse {
             result: Some(data),
@@ -263,7 +286,7 @@ pub struct HashMapJsonRpcServer {
     /**
      * Map with closures and functions assigned with names.
      * */
-    methods: HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorCodeData> + 'static + Sync + Send>>,
+    methods: HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorJsonRpc> + 'static + Sync + Send>>,
 }
 impl HashMapJsonRpcServer {
     pub fn new() -> HashMapJsonRpcServer {
@@ -275,7 +298,7 @@ impl HashMapJsonRpcServer {
      * Adds method with name to server.
      * */
     pub fn register_str<F>(&mut self, name: &str, f: F)
-        where F: Fn(&JsonRpcRequest) -> Result<Json, ErrorCodeData> + 'static + Sync + Send {
+        where F: Fn(&JsonRpcRequest) -> Result<Json, ErrorJsonRpc> + 'static + Sync + Send {
         self.methods.insert(name.to_owned(), Box::new(f));
     }
 
@@ -288,10 +311,10 @@ impl HashMapJsonRpcServer {
 }
 
 impl Handler for HashMapJsonRpcServer {
-    fn handle(&self, req: &JsonRpcRequest) -> Result<Json, ErrorCodeData> {
+    fn handle(&self, req: &JsonRpcRequest) -> Result<Json, ErrorJsonRpc> {
         self.methods.get(&req.method).ok_or_else(||{
             error!("Requested method '{}' not found!", req.method);
-            ErrorCodeData::Without(ErrorCode::MethodNotFound)
+            ErrorJsonRpc::new(ErrorCode::MethodNotFound)
         }).and_then(|s|s(&req))
     }
 }
@@ -343,11 +366,7 @@ impl <H: Handler> JsonRpcServer<H> {
         };
         self.handler.handle(&request).map(|s| JsonRpcResponse::new_result(&request, s))
         .map_err(move |e| { 
-            let (error, data) = match e {
-                ErrorCodeData::Without(e) => (e, None),
-                ErrorCodeData::With(e,d) => (e, Some(d))
-            };
-            InternalErrorCode::WithId(error, request.id, data)
+            InternalErrorCode::WithId(e.error, request.id, e.data)
         })
     }
 
