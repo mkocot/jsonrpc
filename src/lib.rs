@@ -30,42 +30,10 @@ pub enum ErrorCode {
      * */
     InternalError,
     /**
-     * Custom defined server errors. Error code should be between -32099 and -32000.
+     * Custom defined server errors.
+     * Error code should be between -32099 and -32000.
      * */
     ServerError(i32, &'static str),
-}
-
-
-// /**
-// * Error struct returned by user function.
-// * */
-//#[derive(Debug)]
-//pub struct ErrorCodeData {
-//    /**
-//     * Error code
-//     * */
-//    pub error: ErrorCode,
-//
-//    /**
-//     * Extra data (optional)
-//     * */
-//    pub data: Option<Json>,
-//}
-
-impl ErrorJsonRpc {
-    pub fn new(err: ErrorCode) -> ErrorJsonRpc {
-        ErrorJsonRpc {
-            error: err,
-            data: None
-        }
-    }
-
-    pub fn new_data(err: ErrorCode, data: Json) -> ErrorJsonRpc {
-        ErrorJsonRpc {
-            error: err,
-            data: Some(data)
-        }
-    }
 }
 
 /**
@@ -188,18 +156,53 @@ pub struct ErrorJsonRpc {
 }
 
 impl ErrorJsonRpc {
+    /**
+     * Make new Error response instance without additional data.
+     * */
+    pub fn new(err: ErrorCode) -> ErrorJsonRpc {
+        ErrorJsonRpc {
+            error: err,
+            data: None
+        }
+    }
+
+    /**
+     * Make new error response instance with additiobnal data field
+     * */
+    pub fn new_data(err: ErrorCode, data: Json) -> ErrorJsonRpc {
+        ErrorJsonRpc {
+            error: err,
+            data: Some(data)
+        }
+    }
+
+    /**
+     * Get code for error
+     * */
     pub fn get_code(&self) -> i32 {
         self.error.get_code()
     }
+
+    /**
+     * Get short description message for error
+     * */
     pub fn get_message(&self) -> &str {
         self.error.get_desc()
     }
+
+    /**
+     * Get additional data for error.
+     * */
     pub fn get_data(&self) -> &Option<Json> {
         &self.data
     }
 }
 
+
 impl ToJson for ErrorJsonRpc {
+    /**
+     * Convert ErrorJsonRpc to Json
+     * */
     fn to_json(&self) -> Json {
         let mut d = BTreeMap::new();
         d.insert("code".to_owned(), self.get_code().to_json());
@@ -226,12 +229,15 @@ pub struct JsonRpcResponse {
     error: Option<ErrorJsonRpc>,
 
     /**
-     * Response id. Exactly match id from request. Value is never None.
+     * Response id. Exactly match id from request. Value is None only for notification.
      * */
     id: Option<Json>
 }
 
 impl JsonRpcResponse {
+    /**
+     * Build response with error
+     * */
     fn new_error(err: ErrorCode, data: Option<Json>, id: Option<Json>)
         -> JsonRpcResponse {
         let error = if err.is_valid() { err } else { ErrorCode::InternalError };
@@ -245,6 +251,9 @@ impl JsonRpcResponse {
         }
     }
 
+    /**
+     * Build response with result
+     * */
     fn new_result(req: &JsonRpcRequest, data: Json) -> JsonRpcResponse {
         JsonRpcResponse {
             result: Some(data),
@@ -255,10 +264,12 @@ impl JsonRpcResponse {
 }
 
 impl ToJson for JsonRpcResponse {
-    //Simple serialization
+    /**
+     * Convert JsonRpcResponse to Json
+     * */
     fn to_json(&self) -> Json {
         if self.id == None {
-            return ().to_json();
+            return Json::Null;
         }
         let mut d = BTreeMap::new();
         d.insert("jsonrpc".to_owned(), "2.0".to_owned().to_json());
@@ -288,12 +299,17 @@ pub struct HashMapJsonRpcServer {
      * */
     methods: HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorJsonRpc> + 'static + Sync + Send>>,
 }
+
 impl HashMapJsonRpcServer {
+    /**
+     * Make new server handler based on closures stored in hashmap
+     * */
     pub fn new() -> HashMapJsonRpcServer {
         HashMapJsonRpcServer {
             methods: HashMap::new()
         }
     }
+
     /**
      * Adds method with name to server.
      * */
@@ -318,6 +334,7 @@ impl Handler for HashMapJsonRpcServer {
         }).and_then(|s|s(&req))
     }
 }
+
 impl JsonRpcServer<HashMapJsonRpcServer> {
     /**
      * Create new default instance of JsonRpcServer.
@@ -350,6 +367,7 @@ impl <H: Handler> JsonRpcServer<H> {
             Some(json) => match *json {
                 Json::Array(_) => Some(json.clone()),
                 Json::Object(_) => Some(json.clone()),
+                Json::Null => None,
                 _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None)),
             },
             None => None
@@ -466,10 +484,16 @@ impl <H: Handler> JsonRpcServer<H> {
         }
     }
 
+    /**
+     * Get handler reference
+     * */
     pub fn get_handler(&self) -> &H {
         &self.handler
     }
 
+    /**
+     * Get mutable handler reference
+     * */
     pub fn get_handler_mut(&mut self) -> &mut H {
         &mut self.handler
     }
@@ -506,6 +530,24 @@ mod tests {
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
     }
+
+    #[test]
+    fn test_empty_params() {
+        let mut server = JsonRpcServer::new();
+        {
+            let mut handler = server.get_handler_mut();
+            handler.register_str("simple_method", |_| Ok(1.to_json()));
+        }
+        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"simple_method\", \"params\": null, \"id\": 3}";
+        let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"result\": 1, \"id\": 3}");
+        let response = Json::from_str(&server.handle_request(request).unwrap());
+        assert_eq!(expected_response, response);
+
+        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"simple_method\", \"params\": null, \"id\": 3}";
+        let response = Json::from_str(&server.handle_request(request).unwrap());
+        assert_eq!(expected_response, response);
+    }
+
     #[test]
     fn test_notification() {
         //--> {"jsonrpc": "2.0", "method": "update", "params": [1,2,3,4,5]}
