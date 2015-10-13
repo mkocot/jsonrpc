@@ -525,8 +525,8 @@ mod tests {
 
     #[test]
     fn test_non_existing_method() {
-    //--> {"jsonrpc": "2.0", "method": "foobar", "id": "1"}
-    //<-- {"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found"}, "id": "1"}
+        //--> {"jsonrpc": "2.0", "method": "foobar", "id": "1"}
+        //<-- {"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found"}, "id": "1"}
         let server = JsonRpcServer::new();
         let request = "{\"jsonrpc\": \"2.0\", \"method\": \"foobar\",
             \"id\": \"1\"}";
@@ -538,8 +538,8 @@ mod tests {
     }
     #[test]
     fn test_call_invalid_json() {
-    //--> {"jsonrpc": "2.0", "method": "foobar, "params": "bar", "baz]
-    //<-- {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": null}
+        //--> {"jsonrpc": "2.0", "method": "foobar, "params": "bar", "baz]
+        //<-- {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": null}
         let server = JsonRpcServer::new();
         let request = "{\"jsonrpc\": \"2.0\", \"method\": \"foobar, \"params\": \"bar\", \"baz]";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32700, \"message\": \"Parse error\"}, \"id\": null}");
@@ -549,8 +549,8 @@ mod tests {
 
     #[test]
     fn test_call_invalid_request() {
-    //--> {"jsonrpc": "2.0", "method": 1, "params": "bar"}
-    //<-- {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid Request"}, "id": null}
+        //--> {"jsonrpc": "2.0", "method": 1, "params": "bar"}
+        //<-- {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid Request"}, "id": null}
         let server = JsonRpcServer::new();
         let request = "{\"jsonrpc\": \"2.0\", \"method\": 1, \"params\": \"bar\"}";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}");
