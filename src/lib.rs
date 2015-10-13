@@ -293,55 +293,23 @@ pub struct JsonRpcServer<H: Handler + 'static> {
     handler: H
 }
 
-pub struct HashMapJsonRpcServer {
-    /**
-     * Map with closures and functions assigned with names.
-     * */
-    methods: HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorJsonRpc> + 'static + Sync + Send>>,
-}
-
-impl HashMapJsonRpcServer {
-    /**
-     * Make new server handler based on closures stored in hashmap
-     * */
-    pub fn new() -> HashMapJsonRpcServer {
-        HashMapJsonRpcServer {
-            methods: HashMap::new()
-        }
-    }
-
-    /**
-     * Adds method with name to server.
-     * */
-    pub fn register_str<F>(&mut self, name: &str, f: F)
-        where F: Fn(&JsonRpcRequest) -> Result<Json, ErrorJsonRpc> + 'static + Sync + Send {
-        self.methods.insert(name.to_owned(), Box::new(f));
-    }
-
-    /**
-     * Remove method from known names.
-     * */
-    pub fn unregister_str(&mut self, name: &str) {
-        self.methods.remove(name);
-    }
-}
-
-impl Handler for HashMapJsonRpcServer {
+pub type HashMapWithMethods = HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorJsonRpc> + 'static + Sync + Send>>;
+impl Handler for HashMapWithMethods {
     fn handle(&self, req: &JsonRpcRequest) -> Result<Json, ErrorJsonRpc> {
-        self.methods.get(&req.method).ok_or_else(||{
+        self.get(&req.method).ok_or_else(||{
             error!("Requested method '{}' not found!", req.method);
             ErrorJsonRpc::new(ErrorCode::MethodNotFound)
         }).and_then(|s|s(&req))
     }
 }
 
-impl JsonRpcServer<HashMapJsonRpcServer> {
+impl JsonRpcServer<HashMapWithMethods> {
     /**
      * Create new default instance of JsonRpcServer.
      * */
-    pub fn new() -> JsonRpcServer<HashMapJsonRpcServer> {
+    pub fn new() -> JsonRpcServer<HashMapWithMethods> {
         JsonRpcServer {
-            handler: HashMapJsonRpcServer::new()
+            handler: Default::default()
         }
     }
 }
@@ -383,7 +351,7 @@ impl <H: Handler> JsonRpcServer<H> {
             id: request_id.clone()
         };
         self.handler.handle(&request).map(|s| JsonRpcResponse::new_result(&request, s))
-        .map_err(move |e| { 
+        .map_err(move |e| {
             InternalErrorCode::WithId(e.error, request.id, e.data)
         })
     }
@@ -507,11 +475,9 @@ mod tests {
     //tests from JSON-RPC RFC
     #[test]
     fn test_positional() {
-        let mut server = JsonRpcServer::new();
-        {
-            let mut handler = server.get_handler_mut();
-            handler.register_str("subtract", |_| Ok(19.to_json()));
-        }
+        let mut handler = HashMapWithMethods::new();
+        handler.insert("subtract".to_owned(), Box::new(|_| Ok(19.to_json())));
+        let server = JsonRpcServer::new_handler(handler);
         let request = "{\"jsonrpc\": \"2.0\", \"method\": \"subtract\", \"params\": [42, 23], \"id\": 1}";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"result\": 19, \"id\": 1}");
         let response = Json::from_str(&server.handle_request(request).unwrap());
@@ -520,11 +486,9 @@ mod tests {
 
     #[test]
     fn test_named() {
-        let mut server = JsonRpcServer::new();
-        {
-            let mut handler = server.get_handler_mut();
-            handler.register_str("subtract", |_| Ok(19.to_json()));
-        }
+        let mut handler = HashMapWithMethods::new();
+        handler.insert("subtract".to_owned(), Box::new(|_| Ok(19.to_json())));
+        let server = JsonRpcServer::new_handler(handler);
         let request = "{\"jsonrpc\": \"2.0\", \"method\": \"subtract\", \"params\": {\"subtrahend\": 23, \"minuend\": 42}, \"id\": 3}";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"result\": 19, \"id\": 3}");
         let response = Json::from_str(&server.handle_request(request).unwrap());
@@ -533,11 +497,9 @@ mod tests {
 
     #[test]
     fn test_empty_params() {
-        let mut server = JsonRpcServer::new();
-        {
-            let mut handler = server.get_handler_mut();
-            handler.register_str("simple_method", |_| Ok(1.to_json()));
-        }
+        let mut handler = HashMapWithMethods::new();
+        handler.insert("simple_method".to_owned(), Box::new(|_| Ok(1.to_json())));
+        let server = JsonRpcServer::new_handler(handler);
         let request = "{\"jsonrpc\": \"2.0\", \"method\": \"simple_method\", \"params\": null, \"id\": 3}";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"result\": 1, \"id\": 3}");
         let response = Json::from_str(&server.handle_request(request).unwrap());
@@ -552,12 +514,10 @@ mod tests {
     fn test_notification() {
         //--> {"jsonrpc": "2.0", "method": "update", "params": [1,2,3,4,5]}
         //--> {"jsonrpc": "2.0", "method": "foobar"}
-        let mut server = JsonRpcServer::new();
-        {
-            let mut handler = server.get_handler_mut();
-            handler.register_str("update", |_| Ok(Json::Null));
-            handler.register_str("foobar", |_| Ok(Json::Null));
-        }
+        let mut handler = HashMapWithMethods::new();
+        handler.insert("update".to_owned(), Box::new(|_| Ok(Json::Null)));
+        handler.insert("foobar".to_owned(), Box::new(|_| Ok(Json::Null)));
+        let server = JsonRpcServer::new_handler(handler);
         let response = server.handle_request("{\"jsonrpc\": \"2.0\", \"method\": \"update\", \"params\": [1,2,3,4,5]}");
         assert_eq!(None, response);
         assert_eq!(None, server.handle_request("{\"jsonrpc\": \"2.0\", \"method\": \"foobar\"}"));
@@ -663,10 +623,10 @@ mod tests {
         let mut server = JsonRpcServer::new();
         {
             let mut handler = server.get_handler_mut();
-            handler.register_str("sum", |_| Ok(7.to_json()));
-            handler.register_str("notify_hello", |_| Ok(Json::Null));
-            handler.register_str("subtract", |_| Ok(19.to_json()));
-            handler.register_str("get_data", |_| Ok(vec!["hello".to_json(), 5.to_json()].to_json()));
+            handler.insert("sum".to_owned(), Box::new(|_| Ok(7.to_json())));
+            handler.insert("notify_hello".to_owned(), Box::new(|_| Ok(Json::Null)));
+            handler.insert("subtract".to_owned(), Box::new(|_| Ok(19.to_json())));
+            handler.insert("get_data".to_owned(), Box::new(|_| Ok(vec!["hello".to_json(), 5.to_json()].to_json())));
         }
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
@@ -678,12 +638,10 @@ mod tests {
         {\"jsonrpc\": \"2.0\", \"method\": \"notify_sum\", \"params\": [1,2,4]},
         {\"jsonrpc\": \"2.0\", \"method\": \"notify_hello\", \"params\": [7]}
         ]";
-        let mut server = JsonRpcServer::new();
-        {
-            let mut handler = server.get_handler_mut();
-            handler.register_str("notify_sum", |_| Ok(Json::Null));
-            handler.register_str("notify_hello", |_| Ok(Json::Null));
-        }
+        let mut handler = HashMapWithMethods::new();
+        handler.insert("notify_sum".to_owned(), Box::new(|_| Ok(Json::Null)));
+        handler.insert("notify_hello".to_owned(), Box::new(|_| Ok(Json::Null)));
+        let server = JsonRpcServer::new_handler(handler);
         let response = server.handle_request(request);
         assert_eq!(None, response);
     }

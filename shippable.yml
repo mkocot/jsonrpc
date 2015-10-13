@@ -1,0 +1,26 @@
+# This is not relevant
+language: python
+
+# This is not relevant
+python:
+  - 2.7
+
+# This speeds up runing test
+build_image: shippableimages/ubuntu1404_python
+
+# Install deps
+before_install:
+    - apt-get -y update
+#    - apt-get -y upgrade
+    - apt-get -y install curl
+
+# Load cargo & rustc from nightly
+install:
+    - curl -sSf https://static.rust-lang.org/rustup.sh | sh -s -- --channel=nightly --yes
+
+# Build and run test
+script:
+    - cargo test
+
+# Try cache build env
+cache: true
