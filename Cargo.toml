@@ -4,9 +4,14 @@ name = "jsonrpc"
 
 version = "0.1.0"
 
-authors = ["Marcin <kociolek.farfocle@gmail.com>"]
+authors = ["Marcin Kocot <kociolek.farfocle@gmail.com>"]
 
 
 [dependencies]
 rustc-serialize = "*"
 log = "0.3.2"
+clippy = {version = "0.0.21", optional = true}
+
+[features]
+default = []
+dev = ["clippy"]

@@ -55,7 +55,7 @@ enum InternalErrorCode {
     /**
      * Special case when error is returned before request id could be determined.
      * */
-    WithoutId(ErrorCode, Option<Json>)
+    WithoutId(ErrorCode, Option<Json>),
 }
 
 impl InternalErrorCode {
@@ -65,14 +65,14 @@ impl InternalErrorCode {
     fn into_response(self) -> JsonRpcResponse {
         let (err, id, data) = match self {
             InternalErrorCode::WithId(err, id, data) => (err, id, data),
-            //Convert to Json::Null
-            InternalErrorCode::WithoutId(err, data) => (err, Some(Json::Null), data)
+            // Convert to Json::Null
+            InternalErrorCode::WithoutId(err, data) => (err, Some(Json::Null), data),
         };
         JsonRpcResponse::new_error(err, data, id)
     }
 }
 
-//Convinient method for getting integer value for error
+// Convinient method for getting integer value for error
 impl ErrorCode {
     /**
      * Retrieve error code.
@@ -84,7 +84,7 @@ impl ErrorCode {
             ErrorCode::MethodNotFound => -32601,
             ErrorCode::InvalidParams => -32602,
             ErrorCode::InternalError => -32603,
-            ErrorCode::ServerError(x, _) => x
+            ErrorCode::ServerError(x, _) => x,
         }
     }
 
@@ -98,7 +98,7 @@ impl ErrorCode {
             ErrorCode::MethodNotFound => "Method not found",
             ErrorCode::InvalidParams => "Invalid params",
             ErrorCode::InternalError => "Internal error",
-            ErrorCode::ServerError(_, s) => s
+            ErrorCode::ServerError(_, s) => s,
         }
     }
 
@@ -108,12 +108,12 @@ impl ErrorCode {
      * */
     fn is_valid(&self) -> bool {
         match *self {
-            //Error code is only valid within that range
+            // Error code is only valid within that range
             ErrorCode::ServerError(-32099...-32000, _) => true,
-            //All remaining ServerError enums are invalid
-            ErrorCode::ServerError(_,_) => false,
-            //All predefined codes are valid
-            _ => true
+            // All remaining ServerError enums are invalid
+            ErrorCode::ServerError(_, _) => false,
+            // All predefined codes are valid
+            _ => true,
         }
     }
 }
@@ -137,7 +137,7 @@ pub struct JsonRpcRequest<'a> {
      * Only OBJECT type is prohibited.
      * This should remain provate field.
      * */
-    id: Option<&'a Json>
+    id: Option<&'a Json>,
 }
 
 /**
@@ -152,7 +152,7 @@ pub struct ErrorJsonRpc {
     /**
      * Extra information and details
      * */
-    data: Option<Json>
+    data: Option<Json>,
 }
 
 impl ErrorJsonRpc {
@@ -162,7 +162,7 @@ impl ErrorJsonRpc {
     pub fn new(err: ErrorCode) -> ErrorJsonRpc {
         ErrorJsonRpc {
             error: err,
-            data: None
+            data: None,
         }
     }
 
@@ -172,7 +172,7 @@ impl ErrorJsonRpc {
     pub fn new_data(err: ErrorCode, data: Json) -> ErrorJsonRpc {
         ErrorJsonRpc {
             error: err,
-            data: Some(data)
+            data: Some(data),
         }
     }
 
@@ -231,23 +231,26 @@ pub struct JsonRpcResponse {
     /**
      * Response id. Exactly match id from request. Value is None only for notification.
      * */
-    id: Option<Json>
+    id: Option<Json>,
 }
 
 impl JsonRpcResponse {
     /**
      * Build response with error
      * */
-    fn new_error(err: ErrorCode, data: Option<Json>, id: Option<Json>)
-        -> JsonRpcResponse {
-        let error = if err.is_valid() { err } else { ErrorCode::InternalError };
+    fn new_error(err: ErrorCode, data: Option<Json>, id: Option<Json>) -> JsonRpcResponse {
+        let error = if err.is_valid() {
+            err
+        } else {
+            ErrorCode::InternalError
+        };
         JsonRpcResponse {
             result: None,
             error: match data {
                 Some(data) => Some(ErrorJsonRpc::new_data(error, data)),
-                None => Some(ErrorJsonRpc::new(error))
+                None => Some(ErrorJsonRpc::new(error)),
             },
-            id: id
+            id: id,
         }
     }
 
@@ -258,7 +261,7 @@ impl JsonRpcResponse {
         JsonRpcResponse {
             result: Some(data),
             error: None,
-            id: req.id.map(|s|s.clone())
+            id: req.id.map(|s| s.clone()),
         }
     }
 }
@@ -290,16 +293,18 @@ impl ToJson for JsonRpcResponse {
  * JSON-RPC processing unit.
  * */
 pub struct JsonRpcServer<H: Handler + 'static> {
-    handler: H
+    handler: H,
 }
 
 pub type HashMapWithMethods = HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorJsonRpc> + 'static + Sync + Send>>;
 impl Handler for HashMapWithMethods {
     fn handle(&self, req: &JsonRpcRequest) -> Result<Json, ErrorJsonRpc> {
-        self.get(req.method).ok_or_else(||{
-            error!("Requested method '{}' not found!", req.method);
-            ErrorJsonRpc::new(ErrorCode::MethodNotFound)
-        }).and_then(|s|s(&req))
+        self.get(req.method)
+            .ok_or_else(|| {
+                error!("Requested method '{}' not found!", req.method);
+                ErrorJsonRpc::new(ErrorCode::MethodNotFound)
+            })
+            .and_then(|s| s(&req))
     }
 }
 
@@ -308,9 +313,7 @@ impl JsonRpcServer<HashMapWithMethods> {
      * Create new default instance of JsonRpcServer.
      * */
     pub fn new() -> JsonRpcServer<HashMapWithMethods> {
-        JsonRpcServer {
-            handler: Default::default()
-        }
+        JsonRpcServer { handler: Default::default() }
     }
 }
 
@@ -325,30 +328,34 @@ impl <H: Handler> JsonRpcServer<H> {
      * Create instance of JsonRpcServer with custom handler
      * */
     pub fn new_handler(h: H) -> JsonRpcServer<H> {
-        JsonRpcServer {
-            handler: h
-        }
+        JsonRpcServer { handler: h }
     }
 
-    fn _handle_single(&self, req: &rustc_serialize::json::Object)
-        -> Result<JsonRpcResponse, InternalErrorCode> {
+    fn _handle_single(&self,
+                      req: &rustc_serialize::json::Object)
+                      -> Result<JsonRpcResponse, InternalErrorCode> {
 
         // Ensure field jsonrpc exist and contains string "2.0"
-        if !req.get("jsonrpc").and_then(|o|o.as_string())
-            .map(|s|s == "2.0").unwrap_or(false) {
-            return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
+        if !req.get("jsonrpc")
+               .and_then(|o| o.as_string())
+               .map(|s| s == "2.0")
+               .unwrap_or(false) {
+            return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None));
         }
 
-        //try parse ID and then pass it to error message
+        // try parse ID and then pass it to error message
         let request_id = req.get("id");
 
         if let Some(&Json::Object(_)) = request_id {
             return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None));
         }
 
-        //At this point we know assigned id
-        let request_method = if let Some(s) = req.get("method").and_then(|m|m.as_string()) { s }
-            else { return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None)) };
+        // At this point we know assigned id
+        let request_method = if let Some(s) = req.get("method").and_then(|m| m.as_string()) {
+            s
+        } else {
+            return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None));
+        };
 
         let request_params = match req.get("params") {
             Some(json) => match *json {
@@ -356,50 +363,54 @@ impl <H: Handler> JsonRpcServer<H> {
                 Json::Null => None,
                 _ => return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None)),
             },
-            None => None
+            None => None,
         };
 
-        //From now request is considered as VALID and code should use WithId
+        // From now request is considered as VALID and code should use WithId
         let request = JsonRpcRequest {
             method: request_method,
             params: request_params,
-            id: request_id
+            id: request_id,
         };
 
-        self.handler.handle(&request)
+        self.handler
+            .handle(&request)
             .map(|s| JsonRpcResponse::new_result(&request, s))
             .map_err(move |e| {
-                InternalErrorCode::WithId(e.error, request.id.map(|x|x.clone()), e.data)
-        })
+                InternalErrorCode::WithId(e.error, request.id.map(|x| x.clone()), e.data)
+            })
     }
 
-    fn _handle_multiple(&self, array: &rustc_serialize::json::Array)
-        -> Result<Option<Json>, InternalErrorCode> {
+    fn _handle_multiple(&self,
+                        array: &rustc_serialize::json::Array)
+                        -> Result<Option<Json>, InternalErrorCode> {
         if array.is_empty() {
             return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None));
         }
 
-        //Convert to vector (required by json api)
-        let response_vector: Vec<_> = array.iter().filter_map(|request| {
-            info!("Processing {}", request);
-            let response = request
+        // Convert to vector (required by json api)
+        let response_vector: Vec<_> = array.iter()
+                                           .filter_map(|request| {
+                                               info!("Processing {}", request);
+                                               let response = request
                 .as_object()
-                //Convert None to error
+                                               // Convert None to error
                 .ok_or(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
-                //Invoke remote procedure
+                                               // Invoke remote procedure
                 .and_then(|o|self._handle_single(o))
-                //Convert any error to Json
+                                               // Convert any error to Json
                 .unwrap_or_else(|e|e.into_response());
 
-            //Skip notifications in response
-            if response.id == None {
-                None
-            } else {
-                Some(response)
-            }
-        }).collect();
+                                               // Skip notifications in response
+                                               if response.id == None {
+                                                   None
+                                               } else {
+                                                   Some(response)
+                                               }
+                                           })
+                                           .collect();
 
-        //All notifications nothing to respond
+        // All notifications nothing to respond
         if response_vector.is_empty() {
             Ok(None)
         } else {
@@ -407,28 +418,27 @@ impl <H: Handler> JsonRpcServer<H> {
         }
     }
 
-    fn _handle_request(&self, request: &str)
-        -> Result<Option<Json>, InternalErrorCode> {
+    fn _handle_request(&self, request: &str) -> Result<Option<Json>, InternalErrorCode> {
         let request_json = try!(Json::from_str(&request));
 
-        //for now only plain object support
+        // for now only plain object support
         match request_json {
-            Json::Object(ref s) => self._handle_single(s).map(|m|Some(m.to_json())),
+            Json::Object(ref s) => self._handle_single(s).map(|m| Some(m.to_json())),
             Json::Array(ref a) => self._handle_multiple(a),
-            _ => Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
+            _ => Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None)),
         }
     }
-    //request: Raw json
-    //return: Raw json
+    // request: Raw json
+    // return: Raw json
     pub fn handle_request(&self, request: &str) -> Option<String> {
         let result = self._handle_request(&request);
         match result {
             Ok(Some(ref resp)) if *resp != Json::Null => Some(resp.to_json().to_string()),
-            //Notification (but got some data?), no returned response anyway
+            // Notification (but got some data?), no returned response anyway
             Ok(Some(ref some)) => {
                 warn!("Co to jest?: {:?}", some);
                 None
-            },
+            }
             Ok(_) => None,
             Err(err) => {
                 let response = err.into_response().to_json();
@@ -462,13 +472,14 @@ mod tests {
     use super::*;
     use rustc_serialize::json::{Json, ToJson};
 
-    //tests from JSON-RPC RFC
+    // tests from JSON-RPC RFC
     #[test]
     fn test_positional() {
         let mut handler = HashMapWithMethods::new();
         handler.insert("subtract".to_owned(), Box::new(|_| Ok(19.to_json())));
         let server = JsonRpcServer::new_handler(handler);
-        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"subtract\", \"params\": [42, 23], \"id\": 1}";
+        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"subtract\", \"params\": [42, 23], \
+                       \"id\": 1}";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"result\": 19, \"id\": 1}");
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
@@ -479,7 +490,8 @@ mod tests {
         let mut handler = HashMapWithMethods::new();
         handler.insert("subtract".to_owned(), Box::new(|_| Ok(19.to_json())));
         let server = JsonRpcServer::new_handler(handler);
-        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"subtract\", \"params\": {\"subtrahend\": 23, \"minuend\": 42}, \"id\": 3}";
+        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"subtract\", \"params\": \
+                       {\"subtrahend\": 23, \"minuend\": 42}, \"id\": 3}";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"result\": 19, \"id\": 3}");
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
@@ -490,72 +502,89 @@ mod tests {
         let mut handler = HashMapWithMethods::new();
         handler.insert("simple_method".to_owned(), Box::new(|_| Ok(1.to_json())));
         let server = JsonRpcServer::new_handler(handler);
-        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"simple_method\", \"params\": null, \"id\": 3}";
+        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"simple_method\", \"params\": null, \
+                       \"id\": 3}";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"result\": 1, \"id\": 3}");
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
 
-        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"simple_method\", \"params\": null, \"id\": 3}";
+        let request = "{\"jsonrpc\": \"2.0\", \"method\": \"simple_method\", \"params\": null, \
+                       \"id\": 3}";
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
     }
 
     #[test]
     fn test_notification() {
-        //--> {"jsonrpc": "2.0", "method": "update", "params": [1,2,3,4,5]}
-        //--> {"jsonrpc": "2.0", "method": "foobar"}
+        // --> {"jsonrpc": "2.0", "method": "update", "params": [1,2,3,4,5]}
+        // --> {"jsonrpc": "2.0", "method": "foobar"}
         let mut handler = HashMapWithMethods::new();
         handler.insert("update".to_owned(), Box::new(|_| Ok(Json::Null)));
         handler.insert("foobar".to_owned(), Box::new(|_| Ok(Json::Null)));
         let server = JsonRpcServer::new_handler(handler);
-        let response = server.handle_request("{\"jsonrpc\": \"2.0\", \"method\": \"update\", \"params\": [1,2,3,4,5]}");
+        let response = server.handle_request("{\"jsonrpc\": \"2.0\", \"method\": \"update\", \
+                                              \"params\": [1,2,3,4,5]}");
         assert_eq!(None, response);
-        assert_eq!(None, server.handle_request("{\"jsonrpc\": \"2.0\", \"method\": \"foobar\"}"));
+        assert_eq!(None,
+                   server.handle_request("{\"jsonrpc\": \"2.0\", \"method\": \"foobar\"}"));
     }
 
     #[test]
     fn test_non_existing_method() {
-        //--> {"jsonrpc": "2.0", "method": "foobar", "id": "1"}
-        //<-- {"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found"}, "id": "1"}
+        // --> {"jsonrpc": "2.0", "method": "foobar", "id": "1"}
+        // <-- {"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not
+        // found"}, "id": "1"}
         let server = JsonRpcServer::new();
         let request = "{\"jsonrpc\": \"2.0\", \"method\": \"foobar\",
             \"id\": \"1\"}";
         let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\",
-            \"error\": {\"code\": -32601, \"message\": \"Method not found\"},
+            \"error\": \
+                                                {\"code\": -32601, \"message\": \"Method not \
+                                                found\"},
             \"id\": \"1\"}");
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
     }
     #[test]
     fn test_call_invalid_json() {
-        //--> {"jsonrpc": "2.0", "method": "foobar, "params": "bar", "baz]
-        //<-- {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": null}
+        // --> {"jsonrpc": "2.0", "method": "foobar, "params": "bar", "baz]
+        // <-- {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"},
+        // "id": null}
         let server = JsonRpcServer::new();
         let request = "{\"jsonrpc\": \"2.0\", \"method\": \"foobar, \"params\": \"bar\", \"baz]";
-        let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32700, \"message\": \"Parse error\"}, \"id\": null}");
+        let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": \
+                                                -32700, \"message\": \"Parse error\"}, \"id\": \
+                                                null}");
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
     }
 
     #[test]
     fn test_call_invalid_request() {
-        //--> {"jsonrpc": "2.0", "method": 1, "params": "bar"}
-        //<-- {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid Request"}, "id": null}
+        // --> {"jsonrpc": "2.0", "method": 1, "params": "bar"}
+        // <-- {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid
+        // Request"}, "id": null}
         let server = JsonRpcServer::new();
         let request = "{\"jsonrpc\": \"2.0\", \"method\": 1, \"params\": \"bar\"}";
-        let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}");
+        let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": \
+                                                -32600, \"message\": \"Invalid Request\"}, \
+                                                \"id\": null}");
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
     }
 
     #[test]
     fn test_call_batch_invalid_json() {
-        let request ="[
-            {\"jsonrpc\": \"2.0\", \"method\": \"sum\", \"params\": [1,2,4], \"id\": \"1\"},
+        let request = "[
+            {\"jsonrpc\": \"2.0\", \"method\": \"sum\", \"params\": \
+                       [1,2,4], \"id\": \"1\"},
             {\"jsonrpc\": \"2.0\", \"method\"
-        ]";
+        \
+                       ]";
         let server = JsonRpcServer::new();
-        let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32700, \"message\": \"Parse error\"}, \"id\": null}");
+        let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": \
+                                                -32700, \"message\": \"Parse error\"}, \"id\": \
+                                                null}");
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
     }
@@ -563,7 +592,9 @@ mod tests {
     #[test]
     fn test_call_with_empty_array() {
         let request = "[]";
-        let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}");
+        let expected_response = Json::from_str("{\"jsonrpc\": \"2.0\", \"error\": {\"code\": \
+                                                -32600, \"message\": \"Invalid Request\"}, \
+                                                \"id\": null}");
         let server = JsonRpcServer::new();
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
@@ -572,7 +603,9 @@ mod tests {
     #[test]
     fn test_call_with_invalid_batch_not_empty() {
         let request = "[1]";
-        let expected_response = Json::from_str("[{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}]");
+        let expected_response = Json::from_str("[{\"jsonrpc\": \"2.0\", \"error\": {\"code\": \
+                                                -32600, \"message\": \"Invalid Request\"}, \
+                                                \"id\": null}]");
         let server = JsonRpcServer::new();
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
@@ -582,10 +615,18 @@ mod tests {
     fn test_call_with_invalid_batch() {
         let request = "[1,2,3]";
         let expected_response = Json::from_str("[
-            {\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null},
-            {\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null},
-            {\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null}
-            ]");
+            {\"jsonrpc\": \"2.0\", \"error\": \
+                                                {\"code\": -32600, \"message\": \"Invalid \
+                                                Request\"}, \"id\": null},
+            \
+                                                {\"jsonrpc\": \"2.0\", \"error\": {\"code\": \
+                                                -32600, \"message\": \"Invalid Request\"}, \
+                                                \"id\": null},
+            {\"jsonrpc\": \
+                                                \"2.0\", \"error\": {\"code\": -32600, \
+                                                \"message\": \"Invalid Request\"}, \"id\": null}
+            \
+                                                ]");
         let server = JsonRpcServer::new();
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
@@ -594,20 +635,35 @@ mod tests {
     #[test]
     fn test_call_batch() {
         let request = "[
-        {\"jsonrpc\": \"2.0\", \"method\": \"sum\", \"params\": [1,2,4], \"id\": \"1\"},
-        {\"jsonrpc\": \"2.0\", \"method\": \"notify_hello\", \"params\": [7]},
-        {\"jsonrpc\": \"2.0\", \"method\": \"subtract\", \"params\": [42,23], \"id\": \"2\"},
-        {\"foo\": \"boo\"},
-        {\"jsonrpc\": \"2.0\", \"method\": \"foo.get\", \"params\": {\"name\": \"myself\"}, \"id\": \"5\"},
-        {\"jsonrpc\": \"2.0\", \"method\": \"get_data\", \"id\": \"9\"}
+        {\"jsonrpc\": \"2.0\", \"method\": \"sum\", \"params\": [1,2,4], \
+                       \"id\": \"1\"},
+        {\"jsonrpc\": \"2.0\", \"method\": \
+                       \"notify_hello\", \"params\": [7]},
+        {\"jsonrpc\": \"2.0\", \
+                       \"method\": \"subtract\", \"params\": [42,23], \"id\": \"2\"},
+        \
+                       {\"foo\": \"boo\"},
+        {\"jsonrpc\": \"2.0\", \"method\": \
+                       \"foo.get\", \"params\": {\"name\": \"myself\"}, \"id\": \"5\"},
+        \
+                       {\"jsonrpc\": \"2.0\", \"method\": \"get_data\", \"id\": \"9\"}
         ]";
 
         let expected_response = Json::from_str("[
-        {\"jsonrpc\": \"2.0\", \"result\": 7, \"id\": \"1\"},
-        {\"jsonrpc\": \"2.0\", \"result\": 19, \"id\": \"2\"},
-        {\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32600, \"message\": \"Invalid Request\"}, \"id\": null},
-        {\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32601, \"message\": \"Method not found\"}, \"id\": \"5\"},
-        {\"jsonrpc\": \"2.0\", \"result\": [\"hello\", 5], \"id\": \"9\"}
+        {\"jsonrpc\": \"2.0\", \"result\": 7, \
+                                                \"id\": \"1\"},
+        {\"jsonrpc\": \"2.0\", \
+                                                \"result\": 19, \"id\": \"2\"},
+        \
+                                                {\"jsonrpc\": \"2.0\", \"error\": {\"code\": \
+                                                -32600, \"message\": \"Invalid Request\"}, \
+                                                \"id\": null},
+        {\"jsonrpc\": \"2.0\", \
+                                                \"error\": {\"code\": -32601, \"message\": \
+                                                \"Method not found\"}, \"id\": \"5\"},
+        \
+                                                {\"jsonrpc\": \"2.0\", \"result\": [\"hello\", \
+                                                5], \"id\": \"9\"}
         ]");
 
         let mut server = JsonRpcServer::new();
@@ -616,7 +672,8 @@ mod tests {
             handler.insert("sum".to_owned(), Box::new(|_| Ok(7.to_json())));
             handler.insert("notify_hello".to_owned(), Box::new(|_| Ok(Json::Null)));
             handler.insert("subtract".to_owned(), Box::new(|_| Ok(19.to_json())));
-            handler.insert("get_data".to_owned(), Box::new(|_| Ok(vec!["hello".to_json(), 5.to_json()].to_json())));
+            handler.insert("get_data".to_owned(),
+                           Box::new(|_| Ok(vec!["hello".to_json(), 5.to_json()].to_json())));
         }
         let response = Json::from_str(&server.handle_request(request).unwrap());
         assert_eq!(expected_response, response);
@@ -625,8 +682,10 @@ mod tests {
     #[test]
     fn test_call_batch_all_notifications() {
         let request = "[
-        {\"jsonrpc\": \"2.0\", \"method\": \"notify_sum\", \"params\": [1,2,4]},
-        {\"jsonrpc\": \"2.0\", \"method\": \"notify_hello\", \"params\": [7]}
+        {\"jsonrpc\": \"2.0\", \"method\": \"notify_sum\", \"params\": \
+                       [1,2,4]},
+        {\"jsonrpc\": \"2.0\", \"method\": \"notify_hello\", \
+                       \"params\": [7]}
         ]";
         let mut handler = HashMapWithMethods::new();
         handler.insert("notify_sum".to_owned(), Box::new(|_| Ok(Json::Null)));
