@@ -1,9 +1,8 @@
 [package]
 
 name = "jsonrpc"
-
 version = "0.1.0"
-
+license = "MIT"
 authors = ["Marcin Kocot <kociolek.farfocle@gmail.com>"]
 
 
