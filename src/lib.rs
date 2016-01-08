@@ -40,7 +40,7 @@ pub enum ErrorCode {
  * Handler for processing request.
  * */
 pub trait Handler {
-    fn handle(&self, reg: &JsonRpcRequest) -> Result<Json, ErrorJsonRpc>;
+    fn handle(&self, reg: &JsonRpcRequest, custom: &HashMap<&str, Json>) -> Result<Json, ErrorJsonRpc>;
 }
 
 /**
@@ -298,7 +298,7 @@ pub struct JsonRpcServer<H: Handler + 'static> {
 
 pub type HashMapWithMethods = HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorJsonRpc> + 'static + Sync + Send>>;
 impl Handler for HashMapWithMethods {
-    fn handle(&self, req: &JsonRpcRequest) -> Result<Json, ErrorJsonRpc> {
+    fn handle(&self, req: &JsonRpcRequest, custom: &HashMap<&str, Json>) -> Result<Json, ErrorJsonRpc> {
         self.get(req.method)
             .ok_or_else(|| {
                 error!("Requested method '{}' not found!", req.method);
@@ -332,7 +332,8 @@ impl <H: Handler> JsonRpcServer<H> {
     }
 
     fn _handle_single(&self,
-                      req: &rustc_serialize::json::Object)
+                      req: &rustc_serialize::json::Object,
+                      custom: &HashMap<&str, Json>)
                       -> Result<JsonRpcResponse, InternalErrorCode> {
 
         // Ensure field jsonrpc exist and contains string "2.0"
@@ -374,7 +375,7 @@ impl <H: Handler> JsonRpcServer<H> {
         };
 
         self.handler
-            .handle(&request)
+            .handle(&request, custom)
             .map(|s| JsonRpcResponse::new_result(&request, s))
             .map_err(move |e| {
                 InternalErrorCode::WithId(e.error, request.id.map(|x| x.clone()), e.data)
@@ -382,7 +383,8 @@ impl <H: Handler> JsonRpcServer<H> {
     }
 
     fn _handle_multiple(&self,
-                        array: &rustc_serialize::json::Array)
+                        array: &rustc_serialize::json::Array,
+                        custom: &HashMap<&str, Json>)
                         -> Result<Option<Json>, InternalErrorCode> {
         if array.is_empty() {
             return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None));
@@ -390,25 +392,22 @@ impl <H: Handler> JsonRpcServer<H> {
 
         // Convert to vector (required by json api)
         let response_vector: Vec<_> = array.iter()
-                                           .filter_map(|request| {
-                                               info!("Processing {}", request);
-                                               let response = request
-                .as_object()
-                                               // Convert None to error
-                .ok_or(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
-                                               // Invoke remote procedure
-                .and_then(|o|self._handle_single(o))
-                                               // Convert any error to Json
-                .unwrap_or_else(|e|e.into_response());
-
-                                               // Skip notifications in response
-                                               if response.id == None {
-                                                   None
-                                               } else {
-                                                   Some(response)
-                                               }
-                                           })
-                                           .collect();
+                .filter_map(|request| {
+                    info!("Processing {}", request);
+                    let response = request.as_object()
+                            // Convert None to error
+                            .ok_or(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
+                            // Invoke remote procedure
+                            .and_then(|o|self._handle_single(o, custom))
+                            // Convert any error to Json
+                            .unwrap_or_else(|e|e.into_response());
+                            // Skip notifications in response
+                            if response.id == None {
+                                None
+                            } else {
+                                Some(response)
+                            }
+                }).collect();
 
         // All notifications nothing to respond
         if response_vector.is_empty() {
@@ -418,20 +417,31 @@ impl <H: Handler> JsonRpcServer<H> {
         }
     }
 
-    fn _handle_request(&self, request: &str) -> Result<Option<Json>, InternalErrorCode> {
+    fn _handle_request(&self,
+                       request: &str,
+                       custom: Option<&HashMap<&str, Json>>) -> Result<Option<Json>, InternalErrorCode> {
         let request_json = try!(Json::from_str(&request));
+        let empty_map = HashMap::new();
+        let custom_plain = match custom {
+            None => &empty_map,
+            Some(c) => c
+        };
 
         // for now only plain object support
         match request_json {
-            Json::Object(ref s) => self._handle_single(s).map(|m| Some(m.to_json())),
-            Json::Array(ref a) => self._handle_multiple(a),
+            Json::Object(ref s) => self._handle_single(s, custom_plain).map(|m| Some(m.to_json())),
+            Json::Array(ref a) => self._handle_multiple(a, custom_plain),
             _ => Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None)),
         }
     }
     // request: Raw json
     // return: Raw json
     pub fn handle_request(&self, request: &str) -> Option<String> {
-        let result = self._handle_request(&request);
+        self.handle_request_custom(request, None)
+    }
+
+    pub fn handle_request_custom(&self, request: &str, custom: Option<&HashMap<&str, Json>>) -> Option<String> {
+        let result = self._handle_request(&request, custom);
         match result {
             Ok(Some(ref resp)) if *resp != Json::Null => Some(resp.to_json().to_string()),
             // Notification (but got some data?), no returned response anyway
