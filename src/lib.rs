@@ -143,6 +143,7 @@ pub struct JsonRpcRequest<'a> {
 /**
  * Describe Error response
  * */
+#[derive(Debug)]
 pub struct ErrorJsonRpc {
     /**
      * Error code
@@ -298,7 +299,7 @@ pub struct JsonRpcServer<H: Handler + 'static> {
 
 pub type HashMapWithMethods = HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorJsonRpc> + 'static + Sync + Send>>;
 impl Handler for HashMapWithMethods {
-    fn handle(&self, req: &JsonRpcRequest, custom: &HashMap<&str, Json>) -> Result<Json, ErrorJsonRpc> {
+    fn handle(&self, req: &JsonRpcRequest, _: &HashMap<&str, Json>) -> Result<Json, ErrorJsonRpc> {
         self.get(req.method)
             .ok_or_else(|| {
                 error!("Requested method '{}' not found!", req.method);
