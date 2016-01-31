@@ -262,7 +262,7 @@ impl JsonRpcResponse {
         JsonRpcResponse {
             result: Some(data),
             error: None,
-            id: req.id.map(|s| s.clone()),
+            id: req.id.cloned(),
         }
     }
 }
@@ -340,8 +340,7 @@ impl <H: Handler> JsonRpcServer<H> {
         // Ensure field jsonrpc exist and contains string "2.0"
         if !req.get("jsonrpc")
                .and_then(|o| o.as_string())
-               .map(|s| s == "2.0")
-               .unwrap_or(false) {
+               .map_or(false, |s| s == "2.0") {
             return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None));
         }
 
@@ -379,7 +378,7 @@ impl <H: Handler> JsonRpcServer<H> {
             .handle(&request, custom)
             .map(|s| JsonRpcResponse::new_result(&request, s))
             .map_err(move |e| {
-                InternalErrorCode::WithId(e.error, request.id.map(|x| x.clone()), e.data)
+                InternalErrorCode::WithId(e.error, request.id.cloned(), e.data)
             })
     }
 
@@ -397,7 +396,7 @@ impl <H: Handler> JsonRpcServer<H> {
                     info!("Processing {}", request);
                     let response = request.as_object()
                             // Convert None to error
-                            .ok_or(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
+                            .ok_or_else(|| InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None))
                             // Invoke remote procedure
                             .and_then(|o|self._handle_single(o, custom))
                             // Convert any error to Json
