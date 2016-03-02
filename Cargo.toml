@@ -13,4 +13,5 @@ clippy = {version = "0.0.21", optional = true}
 
 [features]
 default = []
+nightly = []
 dev = ["clippy"]
