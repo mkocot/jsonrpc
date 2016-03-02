@@ -4,7 +4,9 @@ name = "jsonrpc"
 version = "0.1.0"
 license = "MIT"
 authors = ["Marcin Kocot <kociolek.farfocle@gmail.com>"]
-
+documentation = "https://mkocot.github.io/jsonrpc/jsonrpc/index.html"
+repository = "https://github.com/mkocot/jsonrpc"
+readme = "README.md"
 
 [dependencies]
 rustc-serialize = "*"

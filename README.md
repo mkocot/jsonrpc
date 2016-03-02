@@ -1,5 +1,6 @@
 # jsonrpc
-Jsonrpc is library for handling JSON-RPC 2.0 requests. 
+Jsonrpc is library for handling JSON-RPC 2.0 requests.
+For documentation see [https://mkocot.github.io/jsonrpc/jsonrpc/index.html](https://mkocot.github.io/jsonrpc/jsonrpc/index.html).
 
 # Contact and License
 Jsonrpc is written by Marcin Kocot and is distributed under MIT license. See LICENSE file for details.
