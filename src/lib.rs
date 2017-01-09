@@ -40,7 +40,8 @@ pub enum ErrorCode {
  * Handler for processing request.
  * */
 pub trait Handler {
-    fn handle(&self, reg: &JsonRpcRequest, custom: &HashMap<&str, Json>) -> Result<Json, ErrorJsonRpc>;
+    type Context;
+    fn handle(&self, reg: &JsonRpcRequest, custom: &Self::Context) -> Result<Json, ErrorJsonRpc>;
 }
 
 /**
@@ -299,7 +300,8 @@ pub struct JsonRpcServer<H: Handler + 'static> {
 
 pub type HashMapWithMethods = HashMap<String, Box<Fn(&JsonRpcRequest) -> Result<Json, ErrorJsonRpc> + 'static + Sync + Send>>;
 impl Handler for HashMapWithMethods {
-    fn handle(&self, req: &JsonRpcRequest, _: &HashMap<&str, Json>) -> Result<Json, ErrorJsonRpc> {
+    type Context = ();
+    fn handle(&self, req: &JsonRpcRequest, _: &Self::Context) -> Result<Json, ErrorJsonRpc> {
         self.get(req.method)
             .ok_or_else(|| {
                 error!("Requested method '{}' not found!", req.method);
@@ -334,7 +336,7 @@ impl <H: Handler> JsonRpcServer<H> {
 
     fn _handle_single(&self,
                       req: &rustc_serialize::json::Object,
-                      custom: &HashMap<&str, Json>)
+                      custom: &H::Context)
                       -> Result<JsonRpcResponse, InternalErrorCode> {
 
         // Ensure field jsonrpc exist and contains string "2.0"
@@ -384,7 +386,7 @@ impl <H: Handler> JsonRpcServer<H> {
 
     fn _handle_multiple(&self,
                         array: &rustc_serialize::json::Array,
-                        custom: &HashMap<&str, Json>)
+                        custom: &H::Context)
                         -> Result<Option<Json>, InternalErrorCode> {
         if array.is_empty() {
             return Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None));
@@ -419,28 +421,18 @@ impl <H: Handler> JsonRpcServer<H> {
 
     fn _handle_request(&self,
                        request: &str,
-                       custom: Option<&HashMap<&str, Json>>) -> Result<Option<Json>, InternalErrorCode> {
+                       custom: &H::Context) -> Result<Option<Json>, InternalErrorCode> {
         let request_json = try!(Json::from_str(&request));
-        let empty_map = HashMap::new();
-        let custom_plain = match custom {
-            None => &empty_map,
-            Some(c) => c
-        };
 
         // for now only plain object support
         match request_json {
-            Json::Object(ref s) => self._handle_single(s, custom_plain).map(|m| Some(m.to_json())),
-            Json::Array(ref a) => self._handle_multiple(a, custom_plain),
+            Json::Object(ref s) => self._handle_single(s, custom).map(|m| Some(m.to_json())),
+            Json::Array(ref a) => self._handle_multiple(a, custom),
             _ => Err(InternalErrorCode::WithoutId(ErrorCode::InvalidRequest, None)),
         }
     }
-    // request: Raw json
-    // return: Raw json
-    pub fn handle_request(&self, request: &str) -> Option<String> {
-        self.handle_request_custom(request, None)
-    }
 
-    pub fn handle_request_custom(&self, request: &str, custom: Option<&HashMap<&str, Json>>) -> Option<String> {
+    pub fn handle_request(&self, request: &str, custom: &H::Context) -> Option<String> {
         let result = self._handle_request(&request, custom);
         match result {
             Ok(Some(ref resp)) if *resp != Json::Null => Some(resp.to_json().to_string()),
