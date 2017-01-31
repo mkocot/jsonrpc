@@ -325,7 +325,12 @@ impl From<ParserError> for InternalErrorCode {
         InternalErrorCode::WithoutId(ErrorCode::ParseError, None)
     }
 }
-
+impl <H: Handler> JsonRpcServer<H> where H::Context: Default {
+    /// Specialized implementation for context implementing default trait
+    pub fn handle_request(&self, req: &str) -> Option<String> {
+        self.handle_request_context(req, &Default::default())
+    }
+}
 impl <H: Handler> JsonRpcServer<H> {
     /**
      * Create instance of JsonRpcServer with custom handler
@@ -432,7 +437,7 @@ impl <H: Handler> JsonRpcServer<H> {
         }
     }
 
-    pub fn handle_request(&self, request: &str, custom: &H::Context) -> Option<String> {
+    pub fn handle_request_context(&self, request: &str, custom: &H::Context) -> Option<String> {
         let result = self._handle_request(&request, custom);
         match result {
             Ok(Some(ref resp)) if *resp != Json::Null => Some(resp.to_json().to_string()),
