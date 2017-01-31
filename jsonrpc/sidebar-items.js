@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["ErrorCode","Enum with possible errors."]],"struct":[["ErrorJsonRpc","Describe Error response"],["JsonRpcRequest","Object describing client request."],["JsonRpcResponse","Describe response from server to client."],["JsonRpcServer","JSON-RPC processing unit."]],"trait":[["Handler","Handler for processing request."]],"type":[["HashMapWithMethods",""]]});

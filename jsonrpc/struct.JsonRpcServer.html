@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="rustdoc">
+    <meta name="description" content="API documentation for the Rust `JsonRpcServer` struct in crate `jsonrpc`.">
+    <meta name="keywords" content="rust, rustlang, rust-lang, JsonRpcServer">
+
+    <title>jsonrpc::JsonRpcServer - Rust</title>
+
+    <link rel="stylesheet" type="text/css" href="../rustdoc.css">
+    <link rel="stylesheet" type="text/css" href="../main.css">
+    
+
+    
+    
+</head>
+<body class="rustdoc">
+    <!--[if lte IE 8]>
+    <div class="warning">
+        This old browser is unsupported and will most likely display funky
+        things.
+    </div>
+    <![endif]-->
+
+    
+
+    <nav class="sidebar">
+        
+        <p class='location'><a href='index.html'>jsonrpc</a></p><script>window.sidebarCurrent = {name: 'JsonRpcServer', ty: 'struct', relpath: ''};</script><script defer src="sidebar-items.js"></script>
+    </nav>
+
+    <nav class="sub">
+        <form class="search-form js-only">
+            <div class="search-container">
+                <input class="search-input" name="search"
+                       autocomplete="off"
+                       placeholder="Click or press ‘S’ to search, ‘?’ for more options…"
+                       type="search">
+            </div>
+        </form>
+    </nav>
+
+    <section id='main' class="content struct">
+<h1 class='fqn'><span class='in-band'>Struct <a href='index.html'>jsonrpc</a>::<wbr><a class='struct' href=''>JsonRpcServer</a></span><span class='out-of-band'><span id='render-detail'>
+                   <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">
+                       [<span class='inner'>&#x2212;</span>]
+                   </a>
+               </span><a id='src-78' class='srclink' href='../src/jsonrpc/src/lib.rs.html#297-299' title='goto source code'>[src]</a></span></h1>
+<pre class='rust struct'>pub struct JsonRpcServer&lt;H:&nbsp;<a class='trait' href='../jsonrpc/trait.Handler.html' title='jsonrpc::Handler'>Handler</a> + 'static&gt; { /* fields omitted */ }</pre><div class='docblock'><p>JSON-RPC processing unit.</p>
+</div><h2 id='methods'>Methods</h2><h3 class='impl'><span class='in-band'><code>impl <a class='struct' href='../jsonrpc/struct.JsonRpcServer.html' title='jsonrpc::JsonRpcServer'>JsonRpcServer</a>&lt;<a class='type' href='../jsonrpc/type.HashMapWithMethods.html' title='jsonrpc::HashMapWithMethods'>HashMapWithMethods</a>&gt;</code></span><span class='out-of-band'><div class='ghost'></div><a id='src-90' class='srclink' href='../src/jsonrpc/src/lib.rs.html#314-321' title='goto source code'>[src]</a></span></h3>
+<div class='impl-items'><h4 id='method.new' class='method'><span id='new.v' class='invisible'><code>fn <a href='#method.new' class='fnname'>new</a>() -&gt; <a class='struct' href='../jsonrpc/struct.JsonRpcServer.html' title='jsonrpc::JsonRpcServer'>JsonRpcServer</a>&lt;<a class='type' href='../jsonrpc/type.HashMapWithMethods.html' title='jsonrpc::HashMapWithMethods'>HashMapWithMethods</a>&gt;</code></span></h4>
+<div class='docblock'><p>Create new default instance of JsonRpcServer.</p>
+</div></div><h3 class='impl'><span class='in-band'><code>impl&lt;H:&nbsp;<a class='trait' href='../jsonrpc/trait.Handler.html' title='jsonrpc::Handler'>Handler</a>&gt; <a class='struct' href='../jsonrpc/struct.JsonRpcServer.html' title='jsonrpc::JsonRpcServer'>JsonRpcServer</a>&lt;H&gt; <span class='where'>where H::Context: <a class='trait' href='https://doc.rust-lang.org/nightly/core/default/trait.Default.html' title='core::default::Default'>Default</a></span></code></span><span class='out-of-band'><div class='ghost'></div><a id='src-94' class='srclink' href='../src/jsonrpc/src/lib.rs.html#328-333' title='goto source code'>[src]</a></span></h3>
+<div class='impl-items'><h4 id='method.handle_request' class='method'><span id='handle_request.v' class='invisible'><code>fn <a href='#method.handle_request' class='fnname'>handle_request</a>(&amp;self, req: &amp;<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.str.html'>str</a>) -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/option/enum.Option.html' title='core::option::Option'>Option</a>&lt;<a class='struct' href='https://doc.rust-lang.org/nightly/collections/string/struct.String.html' title='collections::string::String'>String</a>&gt;</code></span></h4>
+<div class='docblock'><p>Specialized implementation for context implementing default trait</p>
+</div></div><h3 class='impl'><span class='in-band'><code>impl&lt;H:&nbsp;<a class='trait' href='../jsonrpc/trait.Handler.html' title='jsonrpc::Handler'>Handler</a>&gt; <a class='struct' href='../jsonrpc/struct.JsonRpcServer.html' title='jsonrpc::JsonRpcServer'>JsonRpcServer</a>&lt;H&gt;</code></span><span class='out-of-band'><div class='ghost'></div><a id='src-99' class='srclink' href='../src/jsonrpc/src/lib.rs.html#334-475' title='goto source code'>[src]</a></span></h3>
+<div class='impl-items'><h4 id='method.new_handler' class='method'><span id='new_handler.v' class='invisible'><code>fn <a href='#method.new_handler' class='fnname'>new_handler</a>(h: H) -&gt; <a class='struct' href='../jsonrpc/struct.JsonRpcServer.html' title='jsonrpc::JsonRpcServer'>JsonRpcServer</a>&lt;H&gt;</code></span></h4>
+<div class='docblock'><p>Create instance of JsonRpcServer with custom handler</p>
+</div><h4 id='method.handle_request_context' class='method'><span id='handle_request_context.v' class='invisible'><code>fn <a href='#method.handle_request_context' class='fnname'>handle_request_context</a>(&amp;self,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; request: &amp;<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.str.html'>str</a>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; custom: &amp;H::Context)<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/option/enum.Option.html' title='core::option::Option'>Option</a>&lt;<a class='struct' href='https://doc.rust-lang.org/nightly/collections/string/struct.String.html' title='collections::string::String'>String</a>&gt;</code></span></h4>
+<h4 id='method.get_handler' class='method'><span id='get_handler.v' class='invisible'><code>fn <a href='#method.get_handler' class='fnname'>get_handler</a>(&amp;self) -&gt; &amp;H</code></span></h4>
+<div class='docblock'><p>Get handler reference</p>
+</div><h4 id='method.get_handler_mut' class='method'><span id='get_handler_mut.v' class='invisible'><code>fn <a href='#method.get_handler_mut' class='fnname'>get_handler_mut</a>(&amp;mut self) -&gt; &amp;mut H</code></span></h4>
+<div class='docblock'><p>Get mutable handler reference</p>
+</div></div></section>
+    <section id='search' class="content hidden"></section>
+
+    <section class="footer"></section>
+
+    <aside id="help" class="hidden">
+        <div>
+            <h1 class="hidden">Help</h1>
+
+            <div class="shortcuts">
+                <h2>Keyboard Shortcuts</h2>
+
+                <dl>
+                    <dt>?</dt>
+                    <dd>Show this help dialog</dd>
+                    <dt>S</dt>
+                    <dd>Focus the search field</dd>
+                    <dt>&larrb;</dt>
+                    <dd>Move up in search results</dd>
+                    <dt>&rarrb;</dt>
+                    <dd>Move down in search results</dd>
+                    <dt>&#9166;</dt>
+                    <dd>Go to active search result</dd>
+                    <dt>+</dt>
+                    <dd>Collapse/expand all sections</dd>
+                </dl>
+            </div>
+
+            <div class="infos">
+                <h2>Search Tricks</h2>
+
+                <p>
+                    Prefix searches with a type followed by a colon (e.g.
+                    <code>fn:</code>) to restrict the search to a given type.
+                </p>
+
+                <p>
+                    Accepted types are: <code>fn</code>, <code>mod</code>,
+                    <code>struct</code>, <code>enum</code>,
+                    <code>trait</code>, <code>type</code>, <code>macro</code>,
+                    and <code>const</code>.
+                </p>
+
+                <p>
+                    Search functions by type signature (e.g.
+                    <code>vec -> usize</code> or <code>* -> vec</code>)
+                </p>
+            </div>
+        </div>
+    </aside>
+
+    
+
+    <script>
+        window.rootPath = "../";
+        window.currentCrate = "jsonrpc";
+    </script>
+    <script src="../jquery.js"></script>
+    <script src="../main.js"></script>
+    <script defer src="../search-index.js"></script>
+</body>
+</html>
